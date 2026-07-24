@@ -14,6 +14,13 @@ const clearSelectionButton = document.getElementById(
   "clearSelectionButton",
 );
 
+const autoNextCheckbox = document.getElementById("autoNextCheckbox");
+const startPageInput = document.getElementById("startPageInput");
+const endPageInput = document.getElementById("endPageInput");
+const runRegionButton = document.getElementById("runRegionButton");
+const stopRunButton = document.getElementById("stopRunButton");
+const runProgress = document.getElementById("runProgress");
+
 const pageIndicator = document.getElementById("pageIndicator");
 const emptyState = document.getElementById("emptyState");
 const canvasWrapper = document.getElementById("canvasWrapper");
@@ -46,6 +53,9 @@ let selection = null;
 let interactionMode = null;
 let dragStart = null;
 
+let isBatchRunning = false;
+let stopRequested = false;
+
 let captures = loadCaptures();
 
 const MIN_SELECTION_SIZE = 15;
@@ -54,7 +64,11 @@ const HANDLE_SIZE = 10;
 documentInput.addEventListener("change", handleDocumentOpen);
 
 previousPageButton.addEventListener("click", async () => {
-  if (currentPageNumber <= 1) {
+  if (
+    isBatchRunning ||
+    !currentDocument ||
+    currentPageNumber <= 1
+  ) {
     return;
   }
 
@@ -63,7 +77,11 @@ previousPageButton.addEventListener("click", async () => {
 });
 
 nextPageButton.addEventListener("click", async () => {
-  if (currentPageNumber >= totalPages) {
+  if (
+    isBatchRunning ||
+    !currentDocument ||
+    currentPageNumber >= totalPages
+  ) {
     return;
   }
 
@@ -72,41 +90,53 @@ nextPageButton.addEventListener("click", async () => {
 });
 
 zoomOutButton.addEventListener("click", async () => {
-  if (!currentDocument) {
+  if (!currentDocument || isBatchRunning) {
     return;
   }
 
   currentScale = Math.max(0.5, currentScale - 0.25);
 
-  /*
-   * Zoom changes the canvas dimensions, so the existing selection
-   * is cleared to prevent capturing the wrong document area.
-   */
   clearSelection();
-
   await renderCurrentPage();
 });
 
 zoomInButton.addEventListener("click", async () => {
-  if (!currentDocument) {
+  if (!currentDocument || isBatchRunning) {
     return;
   }
 
   currentScale = Math.min(3, currentScale + 0.25);
 
-  /*
-   * Zoom changes the canvas dimensions, so the existing selection
-   * is cleared to prevent capturing the wrong document area.
-   */
   clearSelection();
-
   await renderCurrentPage();
 });
 
-clearSelectionButton.addEventListener("click", clearSelection);
-captureButton.addEventListener("click", saveCaptureImmediately);
+clearSelectionButton.addEventListener("click", () => {
+  if (!isBatchRunning) {
+    clearSelection();
+  }
+});
+
+captureButton.addEventListener("click", handleManualCapture);
+
 clearCapturesButton.addEventListener("click", clearAllCaptures);
 exportButton.addEventListener("click", exportCapturesToExcel);
+
+runRegionButton.addEventListener("click", runRegionAcrossPages);
+
+stopRunButton.addEventListener("click", () => {
+  if (!isBatchRunning) {
+    return;
+  }
+
+  stopRequested = true;
+  stopRunButton.disabled = true;
+
+  setRunProgress("Stopping after current page…", "stopped");
+});
+
+startPageInput.addEventListener("change", validatePageRangeInputs);
+endPageInput.addEventListener("change", validatePageRangeInputs);
 
 selectionCanvas.addEventListener("pointerdown", handlePointerDown);
 selectionCanvas.addEventListener("pointermove", handlePointerMove);
@@ -115,6 +145,7 @@ selectionCanvas.addEventListener("pointercancel", handlePointerUp);
 selectionCanvas.addEventListener("pointerleave", updateSelectionCursor);
 
 renderCaptureList();
+updateToolbarState();
 
 async function handleDocumentOpen(event) {
   const file = event.target.files?.[0];
@@ -124,13 +155,15 @@ async function handleDocumentOpen(event) {
   }
 
   try {
-    releasePreviousImageUrl();
+    await releasePreviousDocument();
 
     currentDocumentName = file.name;
     currentPageNumber = 1;
     currentScale = 1.25;
+    totalPages = 0;
 
     clearSelection();
+    setRunProgress("Opening document…");
 
     const isPdf =
       file.type === "application/pdf" ||
@@ -159,21 +192,63 @@ async function handleDocumentOpen(event) {
 
       totalPages = 1;
     } else {
+      currentDocument = null;
+      currentDocumentType = "";
+
       showStatus("Unsupported file type.", true);
+      setRunProgress("Unsupported file", "stopped");
+
       return;
     }
+
+    startPageInput.min = "1";
+    endPageInput.min = "1";
+
+    startPageInput.max = String(totalPages);
+    endPageInput.max = String(totalPages);
+
+    startPageInput.value = "1";
+    endPageInput.value = String(totalPages);
 
     emptyState.classList.add("hidden");
     canvasWrapper.classList.remove("hidden");
 
     await renderCurrentPage();
 
+    setRunProgress("Ready");
     showStatus(`Opened ${currentDocumentName}`);
   } catch (error) {
     console.error(error);
+
+    currentDocument = null;
+    currentDocumentType = "";
+    totalPages = 0;
+
     showStatus("The document could not be opened.", true);
+    setRunProgress("Open failed", "stopped");
   } finally {
     documentInput.value = "";
+    updateToolbarState();
+  }
+}
+
+async function releasePreviousDocument() {
+  if (
+    currentDocumentType === "image" &&
+    currentDocument?.imageUrl
+  ) {
+    URL.revokeObjectURL(currentDocument.imageUrl);
+  }
+
+  if (
+    currentDocumentType === "pdf" &&
+    typeof currentDocument?.destroy === "function"
+  ) {
+    try {
+      await currentDocument.destroy();
+    } catch {
+      // Ignore PDF cleanup failures.
+    }
   }
 }
 
@@ -189,22 +264,20 @@ async function renderCurrentPage() {
       renderImagePage();
     }
 
-    /*
-     * The selection is retained when navigating between pages.
-     * If a new page has slightly different dimensions, the selection
-     * is automatically constrained inside the available page area.
-     */
     if (selection) {
       constrainSelection();
       drawSelection();
     } else {
       clearSelectionOverlay();
+      captureButton.classList.add("hidden");
     }
 
     updateToolbarState();
   } catch (error) {
     console.error(error);
     showStatus("The page could not be rendered.", true);
+
+    throw error;
   }
 }
 
@@ -216,6 +289,13 @@ async function renderPdfPage() {
   });
 
   resizeCanvases(viewport.width, viewport.height);
+
+  documentContext.clearRect(
+    0,
+    0,
+    documentCanvas.width,
+    documentCanvas.height,
+  );
 
   await page.render({
     canvasContext: documentContext,
@@ -268,21 +348,62 @@ function resizeCanvases(width, height) {
 
 function updateToolbarState() {
   const hasDocument = Boolean(currentDocument);
+  const hasSelection = Boolean(selection);
+
+  documentInput.disabled = isBatchRunning;
 
   previousPageButton.disabled =
-    !hasDocument || currentPageNumber <= 1;
+    isBatchRunning ||
+    !hasDocument ||
+    currentPageNumber <= 1;
 
   nextPageButton.disabled =
-    !hasDocument || currentPageNumber >= totalPages;
+    isBatchRunning ||
+    !hasDocument ||
+    currentPageNumber >= totalPages;
 
-  zoomOutButton.disabled = !hasDocument || currentScale <= 0.5;
-  zoomInButton.disabled = !hasDocument || currentScale >= 3;
+  zoomOutButton.disabled =
+    isBatchRunning ||
+    !hasDocument ||
+    currentScale <= 0.5;
 
-  clearSelectionButton.disabled = !selection;
+  zoomInButton.disabled =
+    isBatchRunning ||
+    !hasDocument ||
+    currentScale >= 3;
+
+  clearSelectionButton.disabled =
+    isBatchRunning || !hasSelection;
+
+  startPageInput.disabled =
+    isBatchRunning || !hasDocument;
+
+  endPageInput.disabled =
+    isBatchRunning || !hasDocument;
+
+  autoNextCheckbox.disabled = isBatchRunning;
+
+  runRegionButton.disabled =
+    isBatchRunning ||
+    !hasDocument ||
+    !hasSelection;
+
+  stopRunButton.disabled = !isBatchRunning;
+
+  captureButton.disabled = isBatchRunning;
+
+  clearCapturesButton.disabled =
+    isBatchRunning || captures.length === 0;
+
+  exportButton.disabled =
+    isBatchRunning || captures.length === 0;
+
+  selectionCanvas.style.pointerEvents =
+    isBatchRunning ? "none" : "auto";
 }
 
 function handlePointerDown(event) {
-  if (!currentDocument) {
+  if (!currentDocument || isBatchRunning) {
     return;
   }
 
@@ -329,6 +450,10 @@ function handlePointerDown(event) {
 }
 
 function handlePointerMove(event) {
+  if (isBatchRunning) {
+    return;
+  }
+
   if (!interactionMode || !dragStart) {
     updateSelectionCursor(event);
     return;
@@ -355,13 +480,15 @@ function handlePointerMove(event) {
       x: clamp(
         dragStart.selection.x + offsetX,
         0,
-        selectionCanvas.width - dragStart.selection.width,
+        selectionCanvas.width -
+          dragStart.selection.width,
       ),
 
       y: clamp(
         dragStart.selection.y + offsetY,
         0,
-        selectionCanvas.height - dragStart.selection.height,
+        selectionCanvas.height -
+          dragStart.selection.height,
       ),
     };
   }
@@ -377,14 +504,14 @@ function handlePointerMove(event) {
 }
 
 function handlePointerUp(event) {
-  if (!interactionMode) {
+  if (!interactionMode || isBatchRunning) {
     return;
   }
 
   try {
     selectionCanvas.releasePointerCapture(event.pointerId);
   } catch {
-    // The pointer may already have been released.
+    // Pointer may already be released.
   }
 
   interactionMode = null;
@@ -586,6 +713,11 @@ function getResizeHandle(point) {
 }
 
 function updateSelectionCursor(event) {
+  if (isBatchRunning) {
+    selectionCanvas.style.cursor = "wait";
+    return;
+  }
+
   if (!selection) {
     selectionCanvas.style.cursor = "crosshair";
     return;
@@ -671,10 +803,64 @@ function clearSelection() {
   updateToolbarState();
 }
 
-function saveCaptureImmediately() {
-  if (!selection || !currentDocument) {
-    showStatus("Draw a capture box first.", true);
+async function handleManualCapture() {
+  if (
+    !selection ||
+    !currentDocument ||
+    isBatchRunning
+  ) {
     return;
+  }
+
+  const capture = saveCurrentPageCapture();
+
+  if (!capture) {
+    return;
+  }
+
+  showStatus(
+    `${capture.name} saved from page ${currentPageNumber}.`,
+  );
+
+  if (
+    autoNextCheckbox.checked &&
+    currentPageNumber < totalPages
+  ) {
+    currentPageNumber += 1;
+
+    await renderCurrentPage();
+
+    setRunProgress(
+      `Page ${currentPageNumber} ready`,
+    );
+  } else if (
+    autoNextCheckbox.checked &&
+    currentPageNumber >= totalPages
+  ) {
+    setRunProgress("Last page reached", "complete");
+  }
+}
+
+function saveCurrentPageCapture(options = {}) {
+  const {
+    silent = false,
+    batchId = "",
+    batchStartPage = null,
+    batchEndPage = null,
+  } = options;
+
+  if (!selection || !currentDocument) {
+    if (!silent) {
+      showStatus("Draw a capture box first.", true);
+    }
+
+    return null;
+  }
+
+  constrainSelection();
+
+  if (!selection) {
+    return null;
   }
 
   const captureCanvas = document.createElement("canvas");
@@ -692,8 +878,14 @@ function saveCaptureImmediately() {
   const captureContext = captureCanvas.getContext("2d");
 
   if (!captureContext) {
-    showStatus("The selected area could not be captured.", true);
-    return;
+    if (!silent) {
+      showStatus(
+        "The selected area could not be captured.",
+        true,
+      );
+    }
+
+    return null;
   }
 
   captureContext.drawImage(
@@ -717,7 +909,7 @@ function saveCaptureImmediately() {
       `Capture ${String(captureNumber).padStart(3, "0")}`,
 
     type: "auto",
-    group: "",
+    group: batchId ? `Batch ${batchId}` : "",
     notes: "",
 
     imageDataUrl: captureCanvas.toDataURL("image/png"),
@@ -733,6 +925,11 @@ function saveCaptureImmediately() {
     },
 
     scale: currentScale,
+
+    batchId,
+    batchStartPage,
+    batchEndPage,
+
     createdAt: new Date().toISOString(),
   };
 
@@ -741,21 +938,232 @@ function saveCaptureImmediately() {
   saveCaptures();
   renderCaptureList();
 
-  /*
-   * The selection is intentionally not cleared.
-   * It remains available for capturing the same area on the next page.
-   */
-  showStatus(
-    `${capture.name} saved from page ${currentPageNumber}.`,
+  return capture;
+}
+
+async function runRegionAcrossPages() {
+  if (
+    !currentDocument ||
+    !selection ||
+    isBatchRunning
+  ) {
+    return;
+  }
+
+  validatePageRangeInputs();
+
+  const startPage = Number.parseInt(
+    startPageInput.value,
+    10,
   );
+
+  const endPage = Number.parseInt(
+    endPageInput.value,
+    10,
+  );
+
+  if (
+    !Number.isInteger(startPage) ||
+    !Number.isInteger(endPage)
+  ) {
+    showStatus("Enter a valid page range.", true);
+    return;
+  }
+
+  if (
+    startPage < 1 ||
+    endPage > totalPages ||
+    startPage > endPage
+  ) {
+    showStatus(
+      `Page range must be between 1 and ${totalPages}.`,
+      true,
+    );
+
+    return;
+  }
+
+  const totalToCapture = endPage - startPage + 1;
+
+  const confirmed = window.confirm(
+    `Capture the selected region from ${totalToCapture} page${
+      totalToCapture === 1 ? "" : "s"
+    }?\n\nPages ${startPage} to ${endPage}`,
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  isBatchRunning = true;
+  stopRequested = false;
+
+  const batchId = createBatchId();
+  let completedCount = 0;
+  let failedCount = 0;
+
+  updateToolbarState();
+
+  setRunProgress(
+    `Starting pages ${startPage}–${endPage}…`,
+    "running",
+  );
+
+  try {
+    for (
+      let pageNumber = startPage;
+      pageNumber <= endPage;
+      pageNumber += 1
+    ) {
+      if (stopRequested) {
+        break;
+      }
+
+      currentPageNumber = pageNumber;
+
+      setRunProgress(
+        `Rendering page ${pageNumber} of ${endPage}`,
+        "running",
+      );
+
+      try {
+        await renderCurrentPage();
+        await waitForBrowserPaint();
+
+        if (stopRequested) {
+          break;
+        }
+
+        const capture = saveCurrentPageCapture({
+          silent: true,
+          batchId,
+          batchStartPage: startPage,
+          batchEndPage: endPage,
+        });
+
+        if (capture) {
+          completedCount += 1;
+        } else {
+          failedCount += 1;
+        }
+      } catch (error) {
+        console.error(
+          `Page ${pageNumber} batch capture failed.`,
+          error,
+        );
+
+        failedCount += 1;
+      }
+
+      setRunProgress(
+        `Captured ${completedCount} of ${totalToCapture}`,
+        "running",
+      );
+
+      await delay(40);
+    }
+
+    if (stopRequested) {
+      setRunProgress(
+        `Stopped · ${completedCount} captured`,
+        "stopped",
+      );
+
+      showStatus(
+        `Batch stopped. ${completedCount} page${
+          completedCount === 1 ? "" : "s"
+        } captured.`,
+      );
+    } else {
+      const failureText =
+        failedCount > 0
+          ? ` · ${failedCount} failed`
+          : "";
+
+      setRunProgress(
+        `Complete · ${completedCount} captured${failureText}`,
+        "complete",
+      );
+
+      showStatus(
+        `Batch complete. ${completedCount} page${
+          completedCount === 1 ? "" : "s"
+        } captured.`,
+        failedCount > 0,
+      );
+    }
+  } finally {
+    isBatchRunning = false;
+    stopRequested = false;
+
+    updateToolbarState();
+    drawSelection();
+  }
+}
+
+function validatePageRangeInputs() {
+  if (!currentDocument || totalPages < 1) {
+    return;
+  }
+
+  let startPage = Number.parseInt(
+    startPageInput.value,
+    10,
+  );
+
+  let endPage = Number.parseInt(
+    endPageInput.value,
+    10,
+  );
+
+  if (!Number.isInteger(startPage)) {
+    startPage = 1;
+  }
+
+  if (!Number.isInteger(endPage)) {
+    endPage = totalPages;
+  }
+
+  startPage = clamp(startPage, 1, totalPages);
+  endPage = clamp(endPage, 1, totalPages);
+
+  if (startPage > endPage) {
+    if (document.activeElement === startPageInput) {
+      endPage = startPage;
+    } else {
+      startPage = endPage;
+    }
+  }
+
+  startPageInput.value = String(startPage);
+  endPageInput.value = String(endPage);
+}
+
+function setRunProgress(message, state = "") {
+  runProgress.textContent = message;
+
+  runProgress.classList.remove(
+    "running",
+    "stopped",
+    "complete",
+  );
+
+  if (state) {
+    runProgress.classList.add(state);
+  }
 }
 
 function renderCaptureList() {
   captureCount.textContent =
-    `${captures.length} ${captures.length === 1 ? "capture" : "captures"}`;
+    `${captures.length} ${
+      captures.length === 1 ? "capture" : "captures"
+    }`;
 
-  exportButton.disabled = captures.length === 0;
-  clearCapturesButton.disabled = captures.length === 0;
+  exportButton.disabled =
+    isBatchRunning || captures.length === 0;
+
+  clearCapturesButton.disabled =
+    isBatchRunning || captures.length === 0;
 
   if (captures.length === 0) {
     captureList.innerHTML = `
@@ -764,6 +1172,7 @@ function renderCaptureList() {
       </div>
     `;
 
+    updateToolbarState();
     return;
   }
 
@@ -789,17 +1198,24 @@ function renderCaptureList() {
 
       const meta = document.createElement("p");
       meta.className = "capture-meta";
+
       meta.textContent =
         `${capture.documentName} · Page ${capture.pageNumber}`;
 
       const type = document.createElement("span");
       type.className = "capture-type";
-      type.textContent = capture.type;
+
+      type.textContent =
+        capture.batchId
+          ? `Batch ${capture.batchId}`
+          : capture.type || "auto";
 
       const actions = document.createElement("div");
       actions.className = "capture-card-actions";
 
-      const downloadButton = document.createElement("button");
+      const downloadButton =
+        document.createElement("button");
+
       downloadButton.type = "button";
       downloadButton.textContent = "Download Image";
 
@@ -810,7 +1226,9 @@ function renderCaptureList() {
         );
       });
 
-      const deleteButton = document.createElement("button");
+      const deleteButton =
+        document.createElement("button");
+
       deleteButton.type = "button";
       deleteButton.className = "delete-button";
       deleteButton.textContent = "Delete";
@@ -825,9 +1243,15 @@ function renderCaptureList() {
 
       captureList.append(card);
     });
+
+  updateToolbarState();
 }
 
 function deleteCapture(captureId) {
+  if (isBatchRunning) {
+    return;
+  }
+
   captures = captures.filter(
     (capture) => capture.id !== captureId,
   );
@@ -839,6 +1263,10 @@ function deleteCapture(captureId) {
 }
 
 function clearAllCaptures() {
+  if (isBatchRunning) {
+    return;
+  }
+
   const confirmed = window.confirm(
     "Delete all saved captures from this browser?",
   );
@@ -852,11 +1280,15 @@ function clearAllCaptures() {
   saveCaptures();
   renderCaptureList();
 
+  setRunProgress("Ready");
   showStatus("Captured Items panel cleared.");
 }
 
 async function exportCapturesToExcel() {
-  if (captures.length === 0) {
+  if (
+    captures.length === 0 ||
+    isBatchRunning
+  ) {
     return;
   }
 
@@ -866,12 +1298,16 @@ async function exportCapturesToExcel() {
   }
 
   try {
+    exportButton.disabled = true;
+    exportButton.textContent = "Generating…";
+
     const workbook = new ExcelJS.Workbook();
 
     workbook.creator = "Capture2Excel";
     workbook.created = new Date();
 
-    const indexSheet = workbook.addWorksheet("Capture Index");
+    const indexSheet =
+      workbook.addWorksheet("Capture Index");
 
     indexSheet.columns = [
       {
@@ -903,6 +1339,21 @@ async function exportCapturesToExcel() {
         header: "Group",
         key: "group",
         width: 22,
+      },
+      {
+        header: "Batch ID",
+        key: "batchId",
+        width: 16,
+      },
+      {
+        header: "Batch Start Page",
+        key: "batchStartPage",
+        width: 18,
+      },
+      {
+        header: "Batch End Page",
+        key: "batchEndPage",
+        width: 18,
       },
       {
         header: "Notes",
@@ -942,9 +1393,14 @@ async function exportCapturesToExcel() {
         captureName: capture.name,
         document: capture.documentName,
         page: capture.pageNumber,
-        type: capture.type,
-        group: capture.group,
-        notes: capture.notes,
+        type: capture.type || "auto",
+        group: capture.group || "",
+        batchId: capture.batchId || "",
+        batchStartPage:
+          capture.batchStartPage ?? "",
+        batchEndPage:
+          capture.batchEndPage ?? "",
+        notes: capture.notes || "",
         capturedAt: new Date(capture.createdAt),
         x: capture.coordinates.x,
         y: capture.coordinates.y,
@@ -955,7 +1411,8 @@ async function exportCapturesToExcel() {
 
     styleHeaderRow(indexSheet);
 
-    const imagesSheet = workbook.addWorksheet("Source Images");
+    const imagesSheet =
+      workbook.addWorksheet("Source Images");
 
     imagesSheet.columns = [
       {
@@ -984,6 +1441,11 @@ async function exportCapturesToExcel() {
         width: 22,
       },
       {
+        header: "Batch ID",
+        key: "batchId",
+        width: 16,
+      },
+      {
         header: "Image",
         key: "image",
         width: 70,
@@ -1007,12 +1469,16 @@ async function exportCapturesToExcel() {
         capture.pageNumber;
 
       imagesSheet.getCell(`D${rowNumber}`).value =
-        capture.type;
+        capture.type || "auto";
 
       imagesSheet.getCell(`E${rowNumber}`).value =
-        capture.group;
+        capture.group || "";
 
-      const base64 = capture.imageDataUrl.split(",")[1];
+      imagesSheet.getCell(`F${rowNumber}`).value =
+        capture.batchId || "";
+
+      const base64 =
+        capture.imageDataUrl.split(",")[1];
 
       const imageId = workbook.addImage({
         base64,
@@ -1021,7 +1487,7 @@ async function exportCapturesToExcel() {
 
       imagesSheet.addImage(imageId, {
         tl: {
-          col: 5,
+          col: 6,
           row: rowNumber - 1,
         },
 
@@ -1036,7 +1502,8 @@ async function exportCapturesToExcel() {
       rowNumber += 1;
     }
 
-    const buffer = await workbook.xlsx.writeBuffer();
+    const buffer =
+      await workbook.xlsx.writeBuffer();
 
     const blob = new Blob([buffer], {
       type:
@@ -1052,6 +1519,9 @@ async function exportCapturesToExcel() {
   } catch (error) {
     console.error(error);
     showStatus("Excel export failed.", true);
+  } finally {
+    exportButton.textContent = "Export Excel";
+    updateToolbarState();
   }
 }
 
@@ -1103,11 +1573,20 @@ function styleHeaderRow(sheet) {
 
 function loadCaptures() {
   try {
-    const storedValue = localStorage.getItem(
-      "capture2excel-captures",
-    );
+    const storedValue =
+      localStorage.getItem(
+        "capture2excel-captures",
+      );
 
-    return storedValue ? JSON.parse(storedValue) : [];
+    if (!storedValue) {
+      return [];
+    }
+
+    const parsedValue = JSON.parse(storedValue);
+
+    return Array.isArray(parsedValue)
+      ? parsedValue
+      : [];
   } catch {
     return [];
   }
@@ -1130,7 +1609,8 @@ function saveCaptures() {
 }
 
 function getCanvasPoint(event) {
-  const rectangle = selectionCanvas.getBoundingClientRect();
+  const rectangle =
+    selectionCanvas.getBoundingClientRect();
 
   return {
     x:
@@ -1143,7 +1623,12 @@ function getCanvasPoint(event) {
   };
 }
 
-function normalizeRectangle(startX, startY, endX, endY) {
+function normalizeRectangle(
+  startX,
+  startY,
+  endX,
+  endY,
+) {
   return {
     x: Math.min(startX, endX),
     y: Math.min(startY, endY),
@@ -1153,7 +1638,10 @@ function normalizeRectangle(startX, startY, endX, endY) {
 }
 
 function clamp(value, minimum, maximum) {
-  return Math.min(Math.max(value, minimum), maximum);
+  return Math.min(
+    Math.max(value, minimum),
+    maximum,
+  );
 }
 
 function createId() {
@@ -1167,6 +1655,21 @@ function createId() {
   );
 }
 
+function createBatchId() {
+  const now = new Date();
+
+  const hours =
+    String(now.getHours()).padStart(2, "0");
+
+  const minutes =
+    String(now.getMinutes()).padStart(2, "0");
+
+  const seconds =
+    String(now.getSeconds()).padStart(2, "0");
+
+  return `${hours}${minutes}${seconds}`;
+}
+
 function sanitizeFilename(value) {
   return value
     .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_")
@@ -1178,10 +1681,18 @@ function formatTimestampForFilename() {
   const now = new Date();
 
   const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  const hours = String(now.getHours()).padStart(2, "0");
-  const minutes = String(now.getMinutes()).padStart(2, "0");
+
+  const month =
+    String(now.getMonth() + 1).padStart(2, "0");
+
+  const day =
+    String(now.getDate()).padStart(2, "0");
+
+  const hours =
+    String(now.getHours()).padStart(2, "0");
+
+  const minutes =
+    String(now.getMinutes()).padStart(2, "0");
 
   return `${year}${month}${day}_${hours}${minutes}`;
 }
@@ -1223,13 +1734,18 @@ function loadImage(url) {
   });
 }
 
-function releasePreviousImageUrl() {
-  if (
-    currentDocumentType === "image" &&
-    currentDocument?.imageUrl
-  ) {
-    URL.revokeObjectURL(currentDocument.imageUrl);
-  }
+function waitForBrowserPaint() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(resolve);
+    });
+  });
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
 }
 
 let statusTimeout = null;
@@ -1238,7 +1754,11 @@ function showStatus(message, isError = false) {
   window.clearTimeout(statusTimeout);
 
   statusMessage.textContent = message;
-  statusMessage.classList.toggle("error", isError);
+  statusMessage.classList.toggle(
+    "error",
+    isError,
+  );
+
   statusMessage.classList.remove("hidden");
 
   statusTimeout = window.setTimeout(() => {
