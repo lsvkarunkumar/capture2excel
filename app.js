@@ -406,13 +406,15 @@ function updateToolbarState() {
   clearCapturesButton.disabled =
     isBatchRunning || captures.length === 0;
 
+  processCapturesButton.disabled =
+    isBatchRunning || captures.length === 0;
+
   exportButton.disabled =
     isBatchRunning || captures.length === 0;
 
   selectionCanvas.style.pointerEvents =
     isBatchRunning ? "none" : "auto";
 }
-
 function handlePointerDown(event) {
   if (!currentDocument || isBatchRunning) {
     return;
@@ -1252,8 +1254,6 @@ function renderCaptureList() {
       captures.length === 1 ? "capture" : "captures"
     }`;
 
-  processCapturesButton.disabled =
-  isBatchRunning || captures.length === 0;
   
   exportButton.disabled =
     isBatchRunning || captures.length === 0;
