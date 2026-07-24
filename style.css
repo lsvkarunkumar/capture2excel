@@ -66,8 +66,7 @@ label.button {
 
 .button,
 .toolbar-button,
-.text-button,
-.dialog-close {
+.text-button {
   border: 0;
   cursor: pointer;
 }
@@ -100,9 +99,30 @@ label.button {
   background: #2458d6;
 }
 
+.run-button {
+  color: #ffffff;
+  background: #14804a;
+  border-color: #14804a;
+}
+
+.run-button:hover:not(:disabled) {
+  background: #106d3f;
+}
+
+.stop-button {
+  color: #ffffff;
+  background: #c63c42;
+  border-color: #c63c42;
+}
+
+.stop-button:hover:not(:disabled) {
+  background: #aa3036;
+}
+
 .button:disabled,
 .toolbar-button:disabled,
-.text-button:disabled {
+.text-button:disabled,
+input:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
@@ -130,14 +150,24 @@ label.button {
   flex-direction: column;
 }
 
-.document-toolbar {
-  min-height: 52px;
+.document-toolbar,
+.automation-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
   background: #f8fafc;
   border-bottom: 1px solid #dfe4ec;
+}
+
+.document-toolbar {
+  min-height: 52px;
+}
+
+.automation-toolbar {
+  min-height: 58px;
+  flex-wrap: wrap;
+  background: #ffffff;
 }
 
 .toolbar-button {
@@ -155,11 +185,90 @@ label.button {
 }
 
 #pageIndicator {
-  min-width: 160px;
+  min-width: 210px;
   margin-right: auto;
   color: #47536a;
   font-size: 13px;
   font-weight: 650;
+}
+
+.toggle-control {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  color: #344159;
+  background: #f8fafc;
+  border: 1px solid #d9e0e9;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.toggle-control input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.page-range-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.page-range-control label {
+  color: #5b677c;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.page-range-control input {
+  width: 76px;
+  min-height: 36px;
+  padding: 0 8px;
+  color: #253149;
+  background: #ffffff;
+  border: 1px solid #cfd7e2;
+  border-radius: 6px;
+  outline: none;
+}
+
+.page-range-control input:focus {
+  border-color: #2d67f6;
+  box-shadow: 0 0 0 3px rgba(45, 103, 246, 0.12);
+}
+
+.run-progress {
+  min-width: 170px;
+  margin-left: auto;
+  padding: 8px 10px;
+  color: #536079;
+  background: #f8fafc;
+  border: 1px solid #dce3ec;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.run-progress.running {
+  color: #0f6c3d;
+  background: #edf9f2;
+  border-color: #b9e2ca;
+}
+
+.run-progress.stopped {
+  color: #a12f35;
+  background: #fff1f1;
+  border-color: #efc1c4;
+}
+
+.run-progress.complete {
+  color: #2d5fbe;
+  background: #eef4ff;
+  border-color: #c7d8fa;
 }
 
 .viewer-container {
@@ -186,7 +295,7 @@ label.button {
 
 .empty-state {
   align-self: center;
-  width: min(520px, 80%);
+  width: min(560px, 82%);
   padding: 50px 32px;
   text-align: center;
   color: #68758b;
@@ -365,137 +474,6 @@ label.button {
   color: #c63c42;
 }
 
-.capture-dialog {
-  width: min(900px, 90vw);
-  max-height: 88vh;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  border-radius: 12px;
-  box-shadow: 0 25px 80px rgba(20, 29, 47, 0.32);
-}
-
-.capture-dialog::backdrop {
-  background: rgba(20, 29, 47, 0.58);
-}
-
-.capture-dialog form {
-  display: flex;
-  flex-direction: column;
-  max-height: 88vh;
-}
-
-.dialog-header,
-.dialog-actions {
-  flex: 0 0 auto;
-}
-
-.dialog-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 18px 20px;
-  border-bottom: 1px solid #e0e5ec;
-}
-
-.dialog-header h2 {
-  margin: 0;
-  font-size: 20px;
-}
-
-.dialog-header p {
-  margin: 5px 0 0;
-  color: #748096;
-  font-size: 12px;
-}
-
-.dialog-close {
-  width: 34px;
-  height: 34px;
-  color: #5b677c;
-  background: transparent;
-  border-radius: 6px;
-  font-size: 24px;
-}
-
-.dialog-close:hover {
-  background: #edf1f6;
-}
-
-.dialog-content {
-  min-height: 0;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: 1.1fr 0.9fr;
-  gap: 20px;
-  padding: 20px;
-}
-
-.capture-preview-area {
-  min-height: 320px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: auto;
-  background: #edf1f6;
-  border: 1px solid #d9e0e9;
-  border-radius: 8px;
-}
-
-.capture-preview-area img {
-  display: block;
-  max-width: 100%;
-  max-height: 520px;
-  object-fit: contain;
-}
-
-.capture-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.capture-fields label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: #344159;
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.capture-fields input,
-.capture-fields select,
-.capture-fields textarea {
-  width: 100%;
-  padding: 10px 11px;
-  color: #202b40;
-  background: #ffffff;
-  border: 1px solid #cfd7e2;
-  border-radius: 7px;
-  outline: none;
-}
-
-.capture-fields input:focus,
-.capture-fields select:focus,
-.capture-fields textarea:focus {
-  border-color: #2d67f6;
-  box-shadow: 0 0 0 3px rgba(45, 103, 246, 0.12);
-}
-
-.capture-fields textarea {
-  resize: vertical;
-}
-
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 14px 20px;
-  background: #f8fafc;
-  border-top: 1px solid #e0e5ec;
-}
-
 .status-message {
   position: fixed;
   right: 20px;
@@ -517,4 +495,19 @@ label.button {
 
 .hidden {
   display: none !important;
+}
+
+@media (max-width: 1280px) {
+  body {
+    min-width: 1024px;
+  }
+
+  .workspace {
+    grid-template-columns: minmax(650px, 1fr) 330px;
+  }
+
+  .run-progress {
+    width: 100%;
+    margin-left: 0;
+  }
 }
