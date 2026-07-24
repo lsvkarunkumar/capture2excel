@@ -27,19 +27,6 @@ const clearCapturesButton = document.getElementById(
   "clearCapturesButton",
 );
 
-const captureDialog = document.getElementById("captureDialog");
-const dialogCaptureReference = document.getElementById(
-  "dialogCaptureReference",
-);
-const capturePreviewImage = document.getElementById(
-  "capturePreviewImage",
-);
-const captureNameInput = document.getElementById("captureNameInput");
-const captureTypeSelect = document.getElementById("captureTypeSelect");
-const captureGroupInput = document.getElementById("captureGroupInput");
-const captureNotesInput = document.getElementById("captureNotesInput");
-const saveCaptureButton = document.getElementById("saveCaptureButton");
-
 const statusMessage = document.getElementById("statusMessage");
 
 const documentContext = documentCanvas.getContext("2d", {
@@ -58,7 +45,6 @@ let totalPages = 0;
 let selection = null;
 let interactionMode = null;
 let dragStart = null;
-let pendingCapture = null;
 
 let captures = loadCaptures();
 
@@ -73,7 +59,6 @@ previousPageButton.addEventListener("click", async () => {
   }
 
   currentPageNumber -= 1;
-  clearSelection();
   await renderCurrentPage();
 });
 
@@ -83,7 +68,6 @@ nextPageButton.addEventListener("click", async () => {
   }
 
   currentPageNumber += 1;
-  clearSelection();
   await renderCurrentPage();
 });
 
@@ -93,7 +77,13 @@ zoomOutButton.addEventListener("click", async () => {
   }
 
   currentScale = Math.max(0.5, currentScale - 0.25);
+
+  /*
+   * Zoom changes the canvas dimensions, so the existing selection
+   * is cleared to prevent capturing the wrong document area.
+   */
   clearSelection();
+
   await renderCurrentPage();
 });
 
@@ -103,12 +93,18 @@ zoomInButton.addEventListener("click", async () => {
   }
 
   currentScale = Math.min(3, currentScale + 0.25);
+
+  /*
+   * Zoom changes the canvas dimensions, so the existing selection
+   * is cleared to prevent capturing the wrong document area.
+   */
   clearSelection();
+
   await renderCurrentPage();
 });
 
 clearSelectionButton.addEventListener("click", clearSelection);
-captureButton.addEventListener("click", openCaptureReview);
+captureButton.addEventListener("click", saveCaptureImmediately);
 clearCapturesButton.addEventListener("click", clearAllCaptures);
 exportButton.addEventListener("click", exportCapturesToExcel);
 
@@ -116,8 +112,7 @@ selectionCanvas.addEventListener("pointerdown", handlePointerDown);
 selectionCanvas.addEventListener("pointermove", handlePointerMove);
 selectionCanvas.addEventListener("pointerup", handlePointerUp);
 selectionCanvas.addEventListener("pointercancel", handlePointerUp);
-
-saveCaptureButton.addEventListener("click", savePendingCapture);
+selectionCanvas.addEventListener("pointerleave", updateSelectionCursor);
 
 renderCaptureList();
 
@@ -129,12 +124,19 @@ async function handleDocumentOpen(event) {
   }
 
   try {
+    releasePreviousImageUrl();
+
     currentDocumentName = file.name;
     currentPageNumber = 1;
     currentScale = 1.25;
+
     clearSelection();
 
-    if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+    const isPdf =
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf");
+
+    if (isPdf) {
       currentDocumentType = "pdf";
 
       const fileBuffer = await file.arrayBuffer();
@@ -187,6 +189,18 @@ async function renderCurrentPage() {
       renderImagePage();
     }
 
+    /*
+     * The selection is retained when navigating between pages.
+     * If a new page has slightly different dimensions, the selection
+     * is automatically constrained inside the available page area.
+     */
+    if (selection) {
+      constrainSelection();
+      drawSelection();
+    } else {
+      clearSelectionOverlay();
+    }
+
     updateToolbarState();
   } catch (error) {
     console.error(error);
@@ -196,6 +210,7 @@ async function renderCurrentPage() {
 
 async function renderPdfPage() {
   const page = await currentDocument.getPage(currentPageNumber);
+
   const viewport = page.getViewport({
     scale: currentScale,
   });
@@ -278,21 +293,25 @@ function handlePointerDown(event) {
 
   if (handle) {
     interactionMode = `resize-${handle}`;
+
     dragStart = {
       x: point.x,
       y: point.y,
       selection: { ...selection },
     };
+
     return;
   }
 
   if (selection && isPointInsideSelection(point)) {
     interactionMode = "move";
+
     dragStart = {
       x: point.x,
       y: point.y,
       selection: { ...selection },
     };
+
     return;
   }
 
@@ -332,11 +351,13 @@ function handlePointerMove(event) {
 
     selection = {
       ...dragStart.selection,
+
       x: clamp(
         dragStart.selection.x + offsetX,
         0,
         selectionCanvas.width - dragStart.selection.width,
       ),
+
       y: clamp(
         dragStart.selection.y + offsetY,
         0,
@@ -363,7 +384,7 @@ function handlePointerUp(event) {
   try {
     selectionCanvas.releasePointerCapture(event.pointerId);
   } catch {
-    // Pointer may already have been released.
+    // The pointer may already have been released.
   }
 
   interactionMode = null;
@@ -416,6 +437,14 @@ function constrainSelection() {
     return;
   }
 
+  if (
+    selectionCanvas.width < MIN_SELECTION_SIZE ||
+    selectionCanvas.height < MIN_SELECTION_SIZE
+  ) {
+    clearSelection();
+    return;
+  }
+
   selection.x = clamp(
     selection.x,
     0,
@@ -442,12 +471,7 @@ function constrainSelection() {
 }
 
 function drawSelection() {
-  selectionContext.clearRect(
-    0,
-    0,
-    selectionCanvas.width,
-    selectionCanvas.height,
-  );
+  clearSelectionOverlay();
 
   if (!selection) {
     captureButton.classList.add("hidden");
@@ -477,12 +501,22 @@ function drawSelection() {
   );
 
   selectionContext.setLineDash([]);
+
   drawResizeHandles();
 
   selectionContext.restore();
 
   positionCaptureButton();
   updateToolbarState();
+}
+
+function clearSelectionOverlay() {
+  selectionContext.clearRect(
+    0,
+    0,
+    selectionCanvas.width,
+    selectionCanvas.height,
+  );
 }
 
 function drawResizeHandles() {
@@ -629,28 +663,38 @@ function clearSelection() {
   interactionMode = null;
   dragStart = null;
 
-  selectionContext.clearRect(
-    0,
-    0,
-    selectionCanvas.width,
-    selectionCanvas.height,
-  );
+  clearSelectionOverlay();
 
   captureButton.classList.add("hidden");
+  selectionCanvas.style.cursor = "crosshair";
+
   updateToolbarState();
 }
 
-function openCaptureReview() {
-  if (!selection) {
+function saveCaptureImmediately() {
+  if (!selection || !currentDocument) {
+    showStatus("Draw a capture box first.", true);
     return;
   }
 
   const captureCanvas = document.createElement("canvas");
 
-  captureCanvas.width = Math.round(selection.width);
-  captureCanvas.height = Math.round(selection.height);
+  captureCanvas.width = Math.max(
+    1,
+    Math.round(selection.width),
+  );
+
+  captureCanvas.height = Math.max(
+    1,
+    Math.round(selection.height),
+  );
 
   const captureContext = captureCanvas.getContext("2d");
+
+  if (!captureContext) {
+    showStatus("The selected area could not be captured.", true);
+    return;
+  }
 
   captureContext.drawImage(
     documentCanvas,
@@ -666,62 +710,44 @@ function openCaptureReview() {
 
   const captureNumber = captures.length + 1;
 
-  pendingCapture = {
+  const capture = {
     id: createId(),
+
+    name:
+      `Capture ${String(captureNumber).padStart(3, "0")}`,
+
+    type: "auto",
+    group: "",
+    notes: "",
+
     imageDataUrl: captureCanvas.toDataURL("image/png"),
+
     documentName: currentDocumentName,
     pageNumber: currentPageNumber,
+
     coordinates: {
       x: Math.round(selection.x),
       y: Math.round(selection.y),
       width: Math.round(selection.width),
       height: Math.round(selection.height),
     },
+
     scale: currentScale,
     createdAt: new Date().toISOString(),
   };
 
-  capturePreviewImage.src = pendingCapture.imageDataUrl;
-  captureNameInput.value =
-    `Capture ${String(captureNumber).padStart(3, "0")}`;
-
-  captureTypeSelect.value = "auto";
-  captureGroupInput.value = "";
-  captureNotesInput.value = "";
-
-  dialogCaptureReference.textContent =
-    `${currentDocumentName} · Page ${currentPageNumber}`;
-
-  captureDialog.showModal();
-}
-
-function savePendingCapture(event) {
-  event.preventDefault();
-
-  if (!pendingCapture) {
-    return;
-  }
-
-  const captureName =
-    captureNameInput.value.trim() ||
-    `Capture ${String(captures.length + 1).padStart(3, "0")}`;
-
-  captures.push({
-    ...pendingCapture,
-    name: captureName,
-    type: captureTypeSelect.value,
-    group: captureGroupInput.value.trim(),
-    notes: captureNotesInput.value.trim(),
-  });
+  captures.push(capture);
 
   saveCaptures();
   renderCaptureList();
 
-  pendingCapture = null;
-  captureDialog.close();
-  clearSelection();
-
-  showStatus("Capture saved.");
+  /*
+   * The selection is intentionally not cleared.
+   * It remains available for capturing the same area on the next page.
+   */
+  showStatus(
+    `${capture.name} saved from page ${currentPageNumber}.`,
+  );
 }
 
 function renderCaptureList() {
@@ -737,6 +763,7 @@ function renderCaptureList() {
         Captured regions will appear here.
       </div>
     `;
+
     return;
   }
 
@@ -801,7 +828,9 @@ function renderCaptureList() {
 }
 
 function deleteCapture(captureId) {
-  captures = captures.filter((capture) => capture.id !== captureId);
+  captures = captures.filter(
+    (capture) => capture.id !== captureId,
+  );
 
   saveCaptures();
   renderCaptureList();
@@ -819,10 +848,11 @@ function clearAllCaptures() {
   }
 
   captures = [];
+
   saveCaptures();
   renderCaptureList();
 
-  showStatus("All captures cleared.");
+  showStatus("Captured Items panel cleared.");
 }
 
 async function exportCapturesToExcel() {
@@ -844,18 +874,66 @@ async function exportCapturesToExcel() {
     const indexSheet = workbook.addWorksheet("Capture Index");
 
     indexSheet.columns = [
-      { header: "Capture ID", key: "captureId", width: 24 },
-      { header: "Capture Name", key: "captureName", width: 24 },
-      { header: "Document", key: "document", width: 30 },
-      { header: "Page", key: "page", width: 10 },
-      { header: "Type", key: "type", width: 14 },
-      { header: "Group", key: "group", width: 22 },
-      { header: "Notes", key: "notes", width: 35 },
-      { header: "Captured At", key: "capturedAt", width: 22 },
-      { header: "X", key: "x", width: 10 },
-      { header: "Y", key: "y", width: 10 },
-      { header: "Width", key: "width", width: 12 },
-      { header: "Height", key: "height", width: 12 },
+      {
+        header: "Capture ID",
+        key: "captureId",
+        width: 24,
+      },
+      {
+        header: "Capture Name",
+        key: "captureName",
+        width: 24,
+      },
+      {
+        header: "Document",
+        key: "document",
+        width: 30,
+      },
+      {
+        header: "Page",
+        key: "page",
+        width: 10,
+      },
+      {
+        header: "Type",
+        key: "type",
+        width: 14,
+      },
+      {
+        header: "Group",
+        key: "group",
+        width: 22,
+      },
+      {
+        header: "Notes",
+        key: "notes",
+        width: 35,
+      },
+      {
+        header: "Captured At",
+        key: "capturedAt",
+        width: 22,
+      },
+      {
+        header: "X",
+        key: "x",
+        width: 10,
+      },
+      {
+        header: "Y",
+        key: "y",
+        width: 10,
+      },
+      {
+        header: "Width",
+        key: "width",
+        width: 12,
+      },
+      {
+        header: "Height",
+        key: "height",
+        width: 12,
+      },
     ];
 
     captures.forEach((capture) => {
@@ -880,12 +958,36 @@ async function exportCapturesToExcel() {
     const imagesSheet = workbook.addWorksheet("Source Images");
 
     imagesSheet.columns = [
-      { header: "Capture", key: "capture", width: 26 },
-      { header: "Document", key: "document", width: 30 },
-      { header: "Page", key: "page", width: 10 },
-      { header: "Type", key: "type", width: 14 },
-      { header: "Group", key: "group", width: 22 },
-      { header: "Image", key: "image", width: 70 },
+      {
+        header: "Capture",
+        key: "capture",
+        width: 26,
+      },
+      {
+        header: "Document",
+        key: "document",
+        width: 30,
+      },
+      {
+        header: "Page",
+        key: "page",
+        width: 10,
+      },
+      {
+        header: "Type",
+        key: "type",
+        width: 14,
+      },
+      {
+        header: "Group",
+        key: "group",
+        width: 22,
+      },
+      {
+        header: "Image",
+        key: "image",
+        width: 70,
+      },
     ];
 
     styleHeaderRow(imagesSheet);
@@ -895,13 +997,20 @@ async function exportCapturesToExcel() {
     for (const capture of captures) {
       imagesSheet.getRow(rowNumber).height = 130;
 
-      imagesSheet.getCell(`A${rowNumber}`).value = capture.name;
+      imagesSheet.getCell(`A${rowNumber}`).value =
+        capture.name;
+
       imagesSheet.getCell(`B${rowNumber}`).value =
         capture.documentName;
+
       imagesSheet.getCell(`C${rowNumber}`).value =
         capture.pageNumber;
-      imagesSheet.getCell(`D${rowNumber}`).value = capture.type;
-      imagesSheet.getCell(`E${rowNumber}`).value = capture.group;
+
+      imagesSheet.getCell(`D${rowNumber}`).value =
+        capture.type;
+
+      imagesSheet.getCell(`E${rowNumber}`).value =
+        capture.group;
 
       const base64 = capture.imageDataUrl.split(",")[1];
 
@@ -915,10 +1024,12 @@ async function exportCapturesToExcel() {
           col: 5,
           row: rowNumber - 1,
         },
+
         ext: {
           width: 500,
           height: 160,
         },
+
         editAs: "oneCell",
       });
 
@@ -926,6 +1037,7 @@ async function exportCapturesToExcel() {
     }
 
     const buffer = await workbook.xlsx.writeBuffer();
+
     const blob = new Blob([buffer], {
       type:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -948,6 +1060,7 @@ function styleHeaderRow(sheet) {
 
   headerRow.font = {
     bold: true,
+
     color: {
       argb: "FFFFFFFF",
     },
@@ -956,6 +1069,7 @@ function styleHeaderRow(sheet) {
   headerRow.fill = {
     type: "pattern",
     pattern: "solid",
+
     fgColor: {
       argb: "FF172033",
     },
@@ -979,6 +1093,7 @@ function styleHeaderRow(sheet) {
       row: 1,
       column: 1,
     },
+
     to: {
       row: 1,
       column: sheet.columnCount,
@@ -1021,6 +1136,7 @@ function getCanvasPoint(event) {
     x:
       (event.clientX - rectangle.left) *
       (selectionCanvas.width / rectangle.width),
+
     y:
       (event.clientY - rectangle.top) *
       (selectionCanvas.height / rectangle.height),
@@ -1092,7 +1208,9 @@ function downloadBlob(blob, filename) {
   link.click();
   link.remove();
 
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 1000);
 }
 
 function loadImage(url) {
@@ -1103,6 +1221,15 @@ function loadImage(url) {
     image.onerror = reject;
     image.src = url;
   });
+}
+
+function releasePreviousImageUrl() {
+  if (
+    currentDocumentType === "image" &&
+    currentDocument?.imageUrl
+  ) {
+    URL.revokeObjectURL(currentDocument.imageUrl);
+  }
 }
 
 let statusTimeout = null;
