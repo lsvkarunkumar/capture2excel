@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0"
@@ -10,11 +11,6 @@
   <title>Capture2Excel</title>
 
   <link rel="stylesheet" href="style.css" />
-
-  <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs"
-    type="module"
-  ></script>
 
   <script
     src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"
@@ -28,12 +24,15 @@
   <header class="app-header">
     <div>
       <h1>Capture2Excel</h1>
-      <p>Capture tables, text and graphs from documents</p>
+      <p>
+        Define a document region once and capture it across multiple pages
+      </p>
     </div>
 
     <div class="header-actions">
       <label class="button primary-button">
         Open Document
+
         <input
           id="documentInput"
           type="file"
@@ -42,7 +41,12 @@
         />
       </label>
 
-      <button id="exportButton" class="button" disabled>
+      <button
+        id="exportButton"
+        class="button"
+        type="button"
+        disabled
+      >
         Export Excel
       </button>
     </div>
@@ -51,43 +55,152 @@
   <main class="workspace">
     <section class="document-panel">
       <div class="document-toolbar">
-        <button id="previousPageButton" class="toolbar-button" disabled>
+        <button
+          id="previousPageButton"
+          class="toolbar-button"
+          type="button"
+          disabled
+        >
           Previous
         </button>
 
-        <span id="pageIndicator">No document opened</span>
+        <span id="pageIndicator">
+          No document opened
+        </span>
 
-        <button id="nextPageButton" class="toolbar-button" disabled>
+        <button
+          id="nextPageButton"
+          class="toolbar-button"
+          type="button"
+          disabled
+        >
           Next
         </button>
 
-        <button id="zoomOutButton" class="toolbar-button" disabled>
+        <button
+          id="zoomOutButton"
+          class="toolbar-button"
+          type="button"
+          disabled
+        >
           Zoom −
         </button>
 
-        <button id="zoomInButton" class="toolbar-button" disabled>
+        <button
+          id="zoomInButton"
+          class="toolbar-button"
+          type="button"
+          disabled
+        >
           Zoom +
         </button>
 
-        <button id="clearSelectionButton" class="toolbar-button" disabled>
+        <button
+          id="clearSelectionButton"
+          class="toolbar-button"
+          type="button"
+          disabled
+        >
           Clear Selection
         </button>
       </div>
 
-      <div id="viewerContainer" class="viewer-container">
-        <div id="emptyState" class="empty-state">
+      <div class="automation-toolbar">
+        <label class="toggle-control">
+          <input
+            id="autoNextCheckbox"
+            type="checkbox"
+            checked
+          />
+
+          <span>Auto Next</span>
+        </label>
+
+        <div class="page-range-control">
+          <label for="startPageInput">
+            Start page
+          </label>
+
+          <input
+            id="startPageInput"
+            type="number"
+            min="1"
+            value="1"
+            disabled
+          />
+        </div>
+
+        <div class="page-range-control">
+          <label for="endPageInput">
+            End page
+          </label>
+
+          <input
+            id="endPageInput"
+            type="number"
+            min="1"
+            value="1"
+            disabled
+          />
+        </div>
+
+        <button
+          id="runRegionButton"
+          class="button run-button"
+          type="button"
+          disabled
+        >
+          Run Region
+        </button>
+
+        <button
+          id="stopRunButton"
+          class="button stop-button"
+          type="button"
+          disabled
+        >
+          Stop
+        </button>
+
+        <div
+          id="runProgress"
+          class="run-progress"
+          aria-live="polite"
+        >
+          Ready
+        </div>
+      </div>
+
+      <div
+        id="viewerContainer"
+        class="viewer-container"
+      >
+        <div
+          id="emptyState"
+          class="empty-state"
+        >
           <h2>Open a PDF or image</h2>
+
           <p>
-            Draw a box around a table, graph, text block or image,
-            then click Capture.
+            Draw one box around the required table, graph, text,
+            or image. Use Capture for one page or Run Region for
+            multiple pages.
           </p>
         </div>
 
-        <div id="canvasWrapper" class="canvas-wrapper hidden">
+        <div
+          id="canvasWrapper"
+          class="canvas-wrapper hidden"
+        >
           <canvas id="documentCanvas"></canvas>
+
           <canvas id="selectionCanvas"></canvas>
 
-          <button id="captureButton" class="floating-capture hidden">
+          <button
+            id="captureButton"
+            class="floating-capture hidden"
+            type="button"
+          >
             Capture
           </button>
         </div>
@@ -98,15 +211,26 @@
       <div class="capture-panel-header">
         <div>
           <h2>Captured Items</h2>
-          <p id="captureCount">0 captures</p>
+
+          <p id="captureCount">
+            0 captures
+          </p>
         </div>
 
-        <button id="clearCapturesButton" class="text-button" disabled>
+        <button
+          id="clearCapturesButton"
+          class="text-button"
+          type="button"
+          disabled
+        >
           Clear All
         </button>
       </div>
 
-      <div id="captureList" class="capture-list">
+      <div
+        id="captureList"
+        class="capture-list"
+      >
         <div class="capture-empty-state">
           Captured regions will appear here.
         </div>
@@ -114,83 +238,10 @@
     </aside>
   </main>
 
-  <dialog id="captureDialog" class="capture-dialog">
-    <form method="dialog">
-      <div class="dialog-header">
-        <div>
-          <h2>Review Capture</h2>
-          <p id="dialogCaptureReference"></p>
-        </div>
-
-        <button
-          id="closeDialogButton"
-          class="dialog-close"
-          value="cancel"
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </div>
-
-      <div class="dialog-content">
-        <div class="capture-preview-area">
-          <img id="capturePreviewImage" alt="Selected capture preview" />
-        </div>
-
-        <div class="capture-fields">
-          <label>
-            Capture name
-            <input id="captureNameInput" type="text" />
-          </label>
-
-          <label>
-            Content type
-            <select id="captureTypeSelect">
-              <option value="auto">Auto detect</option>
-              <option value="table">Table</option>
-              <option value="graph">Graph</option>
-              <option value="text">Text</option>
-              <option value="image">Image</option>
-              <option value="mixed">Mixed</option>
-            </select>
-          </label>
-
-          <label>
-            Group or sheet name
-            <input
-              id="captureGroupInput"
-              type="text"
-              placeholder="Example: Production Data"
-            />
-          </label>
-
-          <label>
-            Notes
-            <textarea
-              id="captureNotesInput"
-              rows="4"
-              placeholder="Optional notes"
-            ></textarea>
-          </label>
-        </div>
-      </div>
-
-      <div class="dialog-actions">
-        <button class="button" value="cancel">
-          Cancel
-        </button>
-
-        <button
-          id="saveCaptureButton"
-          class="button primary-button"
-          value="default"
-        >
-          Save Capture
-        </button>
-      </div>
-    </form>
-  </dialog>
-
-  <div id="statusMessage" class="status-message hidden"></div>
+  <div
+    id="statusMessage"
+    class="status-message hidden"
+    aria-live="polite"
+  ></div>
 </body>
 </html>
