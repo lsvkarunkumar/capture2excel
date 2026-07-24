@@ -1558,56 +1558,6 @@ async function exportCapturesToExcel() {
   }
 }
 
-styleHeaderRow(sheet);
-
-    sheet.eachRow((row, index) => {
-
-      if (index === 1) {
-        return;
-      }
-
-      row.alignment = {
-        vertical: "top",
-        wrapText: true,
-      };
-
-      row.height = 120;
-
-    });
-
-    const buffer =
-      await workbook.xlsx.writeBuffer();
-
-    const blob = new Blob(
-      [buffer],
-      {
-        type:
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }
-    );
-
-    downloadBlob(
-      blob,
-      `Capture2Excel_OCR_${formatTimestampForFilename()}.xlsx`
-    );
-
-    showStatus(
-      "OCR exported successfully."
-    );
-
-  } 
-
-
-
-catch (error) {
-    console.error(error);
-    showStatus("Excel export failed.", true);
-  } finally {
-    exportButton.textContent = "Export Excel";
-    updateToolbarState();
-  }
-}
-
 function styleHeaderRow(sheet) {
   const headerRow = sheet.getRow(1);
 
