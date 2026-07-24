@@ -1380,16 +1380,28 @@ function clearAllCaptures() {
   showStatus("Captured Items panel cleared.");
 }
 
+
 async function exportCapturesToExcel() {
-  if (
-    captures.length === 0 ||
-    isBatchRunning
-  ) {
+  if (captures.length === 0 || isBatchRunning) {
     return;
   }
 
   if (!window.ExcelJS) {
     showStatus("Excel library is not available.", true);
+    return;
+  }
+
+  const pending = captures.filter(
+    c =>
+      c.extractionStatus !== "completed" ||
+      !c.extractedText
+  );
+
+  if (pending.length > 0) {
+    showStatus(
+      "Run 'Extract Data' before exporting.",
+      true
+    );
     return;
   }
 
@@ -1402,20 +1414,10 @@ async function exportCapturesToExcel() {
     workbook.creator = "Capture2Excel";
     workbook.created = new Date();
 
-    const indexSheet =
-      workbook.addWorksheet("Capture Index");
+    const sheet =
+      workbook.addWorksheet("OCR Results");
 
-    indexSheet.columns = [
-      {
-        header: "Capture ID",
-        key: "captureId",
-        width: 24,
-      },
-      {
-        header: "Capture Name",
-        key: "captureName",
-        width: 24,
-      },
+    sheet.columns = [
       {
         header: "Document",
         key: "document",
@@ -1426,193 +1428,107 @@ async function exportCapturesToExcel() {
         key: "page",
         width: 10,
       },
-      {
-        header: "Type",
-        key: "type",
-        width: 14,
-      },
-      {
-        header: "Group",
-        key: "group",
-        width: 22,
-      },
-      {
-        header: "Batch ID",
-        key: "batchId",
-        width: 16,
-      },
-      {
-        header: "Batch Start Page",
-        key: "batchStartPage",
-        width: 18,
-      },
-      {
-        header: "Batch End Page",
-        key: "batchEndPage",
-        width: 18,
-      },
-      {
-        header: "Notes",
-        key: "notes",
-        width: 35,
-      },
-      {
-        header: "Captured At",
-        key: "capturedAt",
-        width: 22,
-      },
-      {
-        header: "X",
-        key: "x",
-        width: 10,
-      },
-      {
-        header: "Y",
-        key: "y",
-        width: 10,
-      },
-      {
-        header: "Width",
-        key: "width",
-        width: 12,
-      },
-      {
-        header: "Height",
-        key: "height",
-        width: 12,
-      },
-    ];
-
-    captures.forEach((capture) => {
-      indexSheet.addRow({
-        captureId: capture.id,
-        captureName: capture.name,
-        document: capture.documentName,
-        page: capture.pageNumber,
-        type: capture.type || "auto",
-        group: capture.group || "",
-        batchId: capture.batchId || "",
-        batchStartPage:
-          capture.batchStartPage ?? "",
-        batchEndPage:
-          capture.batchEndPage ?? "",
-        notes: capture.notes || "",
-        capturedAt: new Date(capture.createdAt),
-        x: capture.coordinates.x,
-        y: capture.coordinates.y,
-        width: capture.coordinates.width,
-        height: capture.coordinates.height,
-      });
-    });
-
-    styleHeaderRow(indexSheet);
-
-    const imagesSheet =
-      workbook.addWorksheet("Source Images");
-
-    imagesSheet.columns = [
       {
         header: "Capture",
         key: "capture",
-        width: 26,
+        width: 20,
       },
       {
-        header: "Document",
-        key: "document",
-        width: 30,
+        header: "OCR Confidence",
+        key: "confidence",
+        width: 18,
       },
       {
-        header: "Page",
-        key: "page",
-        width: 10,
-      },
-      {
-        header: "Type",
-        key: "type",
-        width: 14,
-      },
-      {
-        header: "Group",
-        key: "group",
-        width: 22,
-      },
-      {
-        header: "Batch ID",
-        key: "batchId",
-        width: 16,
-      },
-      {
-        header: "Image",
-        key: "image",
-        width: 70,
+        header: "Extracted Text",
+        key: "text",
+        width: 120,
       },
     ];
 
-    styleHeaderRow(imagesSheet);
+    captures.forEach(capture => {
 
-    let rowNumber = 2;
+      sheet.addRow({
 
-    for (const capture of captures) {
-      imagesSheet.getRow(rowNumber).height = 130;
+        document:
+          capture.documentName,
 
-      imagesSheet.getCell(`A${rowNumber}`).value =
-        capture.name;
+        page:
+          capture.pageNumber,
 
-      imagesSheet.getCell(`B${rowNumber}`).value =
-        capture.documentName;
+        capture:
+          capture.name,
 
-      imagesSheet.getCell(`C${rowNumber}`).value =
-        capture.pageNumber;
+        confidence:
+          capture.ocrConfidence ?? "",
 
-      imagesSheet.getCell(`D${rowNumber}`).value =
-        capture.type || "auto";
+        text:
+          capture.extractedText || "",
 
-      imagesSheet.getCell(`E${rowNumber}`).value =
-        capture.group || "";
-
-      imagesSheet.getCell(`F${rowNumber}`).value =
-        capture.batchId || "";
-
-      const base64 =
-        capture.imageDataUrl.split(",")[1];
-
-      const imageId = workbook.addImage({
-        base64,
-        extension: "png",
       });
 
-      imagesSheet.addImage(imageId, {
-        tl: {
-          col: 6,
-          row: rowNumber - 1,
-        },
+    });
 
-        ext: {
-          width: 500,
-          height: 160,
-        },
+    styleHeaderRow(sheet);
 
-        editAs: "oneCell",
-      });
+    sheet.eachRow((row, index) => {
 
-      rowNumber += 1;
-    }
+      if (index === 1) {
+        return;
+      }
+
+      row.alignment = {
+        vertical: "top",
+        wrapText: true,
+      };
+
+      row.height = 120;
+
+    });
 
     const buffer =
       await workbook.xlsx.writeBuffer();
 
-    const blob = new Blob([buffer], {
-      type:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
+    const blob = new Blob(
+      [buffer],
+      {
+        type:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }
+    );
 
     downloadBlob(
       blob,
-      `Capture2Excel_${formatTimestampForFilename()}.xlsx`,
+      `Capture2Excel_OCR_${formatTimestampForFilename()}.xlsx`
     );
 
-    showStatus("Excel workbook generated.");
+    showStatus(
+      "OCR exported successfully."
+    );
+
   } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      "Excel export failed.",
+      true
+    );
+
+  } finally {
+
+    exportButton.textContent =
+      "Export Excel";
+
+    updateToolbarState();
+
+  }
+}
+
+
+
+
+
+catch (error) {
     console.error(error);
     showStatus("Excel export failed.", true);
   } finally {
