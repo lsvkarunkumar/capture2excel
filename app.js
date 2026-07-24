@@ -1207,6 +1207,9 @@ async function processAllCaptures() {
         capture.ocrResult = ocrResult;
         capture.extractedText = ocrResult.text;
         capture.ocrConfidence = ocrResult.confidence;
+        console.log("OCR TEXT:");
+        console.log(capture.extractedText);
+        console.log("OCR CONFIDENCE:", capture.ocrConfidence);
         capture.extractionStatus = "completed";
 
         completed += 1;
