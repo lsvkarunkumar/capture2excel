@@ -1,5 +1,6 @@
 import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
 import { LayoutEngine } from "./modules/layout-engine.js";
+import { OcrEngine } from "./modules/ocr-engine.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
 
@@ -62,6 +63,7 @@ const MIN_SELECTION_SIZE = 15;
 const HANDLE_SIZE = 10;
 
 const layoutEngine = new LayoutEngine();
+const ocrEngine = new OcrEngine();
 
 documentInput.addEventListener("change", handleDocumentOpen);
 
