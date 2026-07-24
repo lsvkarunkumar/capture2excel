@@ -24,14 +24,15 @@
   <header class="app-header">
     <div>
       <h1>Capture2Excel</h1>
+
       <p>
-        Define a document region once and capture it across multiple pages
+        Convert geotechnical borehole reports into one editable Excel table
       </p>
     </div>
 
     <div class="header-actions">
       <label class="button primary-button">
-        Open Document
+        Open Report
 
         <input
           id="documentInput"
@@ -40,6 +41,15 @@
           hidden
         />
       </label>
+
+      <button
+        id="processCapturesButton"
+        class="button process-button"
+        type="button"
+        disabled
+      >
+        Extract Data
+      </button>
 
       <button
         id="exportButton"
@@ -65,7 +75,7 @@
         </button>
 
         <span id="pageIndicator">
-          No document opened
+          No report opened
         </span>
 
         <button
@@ -150,7 +160,7 @@
           type="button"
           disabled
         >
-          Run Region
+          Capture Page Range
         </button>
 
         <button
@@ -171,6 +181,72 @@
         </div>
       </div>
 
+      <div class="report-toolbar">
+        <div class="report-field">
+          <label for="reportTypeSelect">
+            Report type
+          </label>
+
+          <select id="reportTypeSelect">
+            <option value="borehole" selected>
+              Geotechnical Borehole Log
+            </option>
+          </select>
+        </div>
+
+        <div class="report-field">
+          <label for="boreholeIdInput">
+            Borehole ID
+          </label>
+
+          <input
+            id="boreholeIdInput"
+            type="text"
+            placeholder="Auto detect"
+          />
+        </div>
+
+        <div class="report-field">
+          <label for="captureScopeSelect">
+            Capture scope
+          </label>
+
+          <select id="captureScopeSelect">
+            <option value="full-page" selected>
+              Full borehole page
+            </option>
+
+            <option value="field-data">
+              Field data
+            </option>
+
+            <option value="soil-description">
+              Soil description
+            </option>
+
+            <option value="laboratory-data">
+              Laboratory data
+            </option>
+
+            <option value="custom-region">
+              Custom region
+            </option>
+          </select>
+        </div>
+
+        <div class="report-field">
+          <label for="outputModeSelect">
+            Excel output
+          </label>
+
+          <select id="outputModeSelect">
+            <option value="single-table" selected>
+              One master table
+            </option>
+          </select>
+        </div>
+      </div>
+
       <div
         id="viewerContainer"
         class="viewer-container"
@@ -179,12 +255,12 @@
           id="emptyState"
           class="empty-state"
         >
-          <h2>Open a PDF or image</h2>
+          <h2>Open a borehole report</h2>
 
           <p>
-            Draw one box around the required table, graph, text,
-            or image. Use Capture for one page or Run Region for
-            multiple pages.
+            Draw one box around the complete borehole log or select a
+            particular report section. Use Capture for one page or Capture
+            Page Range for several boreholes.
           </p>
         </div>
 
@@ -208,35 +284,131 @@
     </section>
 
     <aside class="capture-panel">
-      <div class="capture-panel-header">
-        <div>
-          <h2>Captured Items</h2>
+      <section class="capture-section">
+        <div class="capture-panel-header">
+          <div>
+            <h2>Captured Boreholes</h2>
 
-          <p id="captureCount">
-            0 captures
-          </p>
+            <p id="captureCount">
+              0 captures
+            </p>
+          </div>
+
+          <button
+            id="clearCapturesButton"
+            class="text-button"
+            type="button"
+            disabled
+          >
+            Clear All
+          </button>
         </div>
 
-        <button
-          id="clearCapturesButton"
-          class="text-button"
-          type="button"
-          disabled
+        <div
+          id="captureList"
+          class="capture-list"
         >
-          Clear All
-        </button>
-      </div>
-
-      <div
-        id="captureList"
-        class="capture-list"
-      >
-        <div class="capture-empty-state">
-          Captured regions will appear here.
+          <div class="capture-empty-state">
+            Captured borehole pages will appear here.
+          </div>
         </div>
-      </div>
+      </section>
+
+      <section class="extraction-section">
+        <div class="extraction-header">
+          <div>
+            <h2>Extraction Status</h2>
+
+            <p id="extractionSummary">
+              No data extracted
+            </p>
+          </div>
+        </div>
+
+        <div class="extraction-statistics">
+          <div class="extraction-stat">
+            <span>Waiting</span>
+            <strong id="waitingCount">0</strong>
+          </div>
+
+          <div class="extraction-stat">
+            <span>Processing</span>
+            <strong id="processingCount">0</strong>
+          </div>
+
+          <div class="extraction-stat">
+            <span>Completed</span>
+            <strong id="completedCount">0</strong>
+          </div>
+
+          <div class="extraction-stat">
+            <span>Review</span>
+            <strong id="reviewCount">0</strong>
+          </div>
+        </div>
+
+        <div
+          id="detectedColumnsPanel"
+          class="detected-columns-panel"
+        >
+          <h3>Detected Report Columns</h3>
+
+          <p id="detectedColumnsEmpty">
+            Columns will be detected from the borehole report.
+          </p>
+
+          <div
+            id="detectedColumnsList"
+            class="detected-columns-list"
+          ></div>
+        </div>
+      </section>
     </aside>
   </main>
+
+  <section
+    id="dataPreviewSection"
+    class="data-preview-section"
+  >
+    <div class="data-preview-header">
+      <div>
+        <h2>Master Excel Table Preview</h2>
+
+        <p>
+          Each new borehole will be appended below the previous borehole in
+          the same worksheet.
+        </p>
+      </div>
+
+      <button
+        id="clearExtractedDataButton"
+        class="text-button"
+        type="button"
+        disabled
+      >
+        Clear Extracted Data
+      </button>
+    </div>
+
+    <div class="data-table-wrapper">
+      <table id="extractedDataTable">
+        <thead id="extractedDataHead">
+          <tr>
+            <th>No extracted columns</th>
+          </tr>
+        </thead>
+
+        <tbody id="extractedDataBody">
+          <tr>
+            <td>
+              Capture and process a borehole report to preview the extracted
+              Excel data.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
   <div
     id="statusMessage"
