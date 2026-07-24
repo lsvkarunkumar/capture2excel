@@ -1,6 +1,6 @@
 export class LayoutEngine {
   constructor() {
-    this.version = "1.2.0";
+    this.version = "1.3.0";
   }
 
   analyze(source) {
@@ -44,15 +44,22 @@ export class LayoutEngine {
       reportBounds,
     );
 
+    const horizontalRows = this.#detectHorizontalRows(
+      grayscale,
+      canvas.width,
+      canvas.height,
+      threshold,
+      reportBounds,
+    );
+
     return {
       pageWidth: canvas.width,
       pageHeight: canvas.height,
+      threshold,
 
       reportBounds,
-
       verticalColumns,
-
-      horizontalRows: [],
+      horizontalRows,
 
       detectedSections: {
         header: null,
@@ -114,11 +121,8 @@ export class LayoutEngine {
     const rowScores = new Float32Array(height);
     const columnScores = new Float32Array(width);
 
-    const horizontalMargin =
-      Math.floor(width * 0.02);
-
-    const verticalMargin =
-      Math.floor(height * 0.02);
+    const horizontalMargin = Math.floor(width * 0.02);
+    const verticalMargin = Math.floor(height * 0.02);
 
     for (
       let y = verticalMargin;
@@ -132,10 +136,7 @@ export class LayoutEngine {
         x < width - horizontalMargin;
         x += 1
       ) {
-        if (
-          grayscale[y * width + x] <
-          threshold
-        ) {
+        if (grayscale[y * width + x] < threshold) {
           darkPixels += 1;
         }
       }
@@ -160,10 +161,7 @@ export class LayoutEngine {
         y < height - verticalMargin;
         y += 1
       ) {
-        if (
-          grayscale[y * width + x] <
-          threshold
-        ) {
+        if (grayscale[y * width + x] < threshold) {
           darkPixels += 1;
         }
       }
@@ -204,11 +202,8 @@ export class LayoutEngine {
       0.08,
     );
 
-    const fallbackPaddingX =
-      Math.round(width * 0.03);
-
-    const fallbackPaddingY =
-      Math.round(height * 0.03);
+    const fallbackPaddingX = Math.round(width * 0.03);
+    const fallbackPaddingY = Math.round(height * 0.03);
 
     const safeLeft =
       left === null
@@ -241,13 +236,12 @@ export class LayoutEngine {
         1,
         safeBottom - safeTop,
       ),
-      confidence:
-        this.#calculateBoundsConfidence(
-          left,
-          right,
-          top,
-          bottom,
-        ),
+      confidence: this.#calculateBoundsConfidence(
+        left,
+        right,
+        top,
+        bottom,
+      ),
     };
   }
 
@@ -258,44 +252,36 @@ export class LayoutEngine {
     threshold,
     reportBounds,
   ) {
-    const startX =
-      Math.max(
-        0,
-        Math.floor(reportBounds.x),
-      );
+    const startX = Math.max(
+      0,
+      Math.floor(reportBounds.x),
+    );
 
-    const endX =
-      Math.min(
-        width - 1,
-        Math.ceil(
-          reportBounds.x +
-          reportBounds.width,
-        ),
-      );
+    const endX = Math.min(
+      width - 1,
+      Math.ceil(
+        reportBounds.x + reportBounds.width,
+      ),
+    );
 
-    const startY =
-      Math.max(
-        0,
-        Math.floor(
-          reportBounds.y +
-          reportBounds.height * 0.08,
-        ),
-      );
+    const startY = Math.max(
+      0,
+      Math.floor(
+        reportBounds.y +
+        reportBounds.height * 0.06,
+      ),
+    );
 
-    const endY =
-      Math.min(
-        height - 1,
-        Math.ceil(
-          reportBounds.y +
-          reportBounds.height * 0.94,
-        ),
-      );
+    const endY = Math.min(
+      height - 1,
+      Math.ceil(
+        reportBounds.y +
+        reportBounds.height * 0.95,
+      ),
+    );
 
-    const columnScores =
-      new Float32Array(width);
-
-    const scanHeight =
-      Math.max(1, endY - startY);
+    const scores = new Float32Array(width);
+    const scanHeight = Math.max(1, endY - startY + 1);
 
     for (
       let x = startX;
@@ -312,149 +298,95 @@ export class LayoutEngine {
         y += 1
       ) {
         const isDark =
-          grayscale[y * width + x] <
-          threshold;
+          grayscale[y * width + x] < threshold;
 
         if (isDark) {
           darkPixels += 1;
           currentRun += 1;
-
-          if (currentRun > longestRun) {
-            longestRun = currentRun;
-          }
+          longestRun = Math.max(
+            longestRun,
+            currentRun,
+          );
         } else {
           currentRun = 0;
         }
       }
 
-      const darkRatio =
-        darkPixels / scanHeight;
+      const darkRatio = darkPixels / scanHeight;
+      const runRatio = longestRun / scanHeight;
 
-      const continuousRatio =
-        longestRun / scanHeight;
-
-      columnScores[x] =
+      scores[x] =
         darkRatio * 0.45 +
-        continuousRatio * 0.55;
+        runRatio * 0.55;
     }
 
-    const smoothedScores =
-      this.#smoothScores(
-        columnScores,
-        2,
-        startX,
-        endX,
-      );
+    const smoothed = this.#smoothScores(
+      scores,
+      2,
+      startX,
+      endX,
+    );
 
-    const candidateGroups = [];
+    const groups = this.#findScoreGroups(
+      smoothed,
+      startX,
+      endX,
+      0.18,
+    );
 
-    let groupStart = null;
+    const lines = groups
+      .map((group) => {
+        const strongest = this.#findStrongestPosition(
+          smoothed,
+          group.start,
+          group.end,
+        );
 
-    const minimumScore = 0.18;
-
-    for (
-      let x = startX;
-      x <= endX;
-      x += 1
-    ) {
-      if (
-        smoothedScores[x] >=
-        minimumScore
-      ) {
-        if (groupStart === null) {
-          groupStart = x;
-        }
-      } else if (groupStart !== null) {
-        candidateGroups.push({
-          start: groupStart,
-          end: x - 1,
-        });
-
-        groupStart = null;
-      }
-    }
-
-    if (groupStart !== null) {
-      candidateGroups.push({
-        start: groupStart,
-        end: endX,
+        return {
+          x: strongest.position,
+          score: strongest.score,
+          thickness:
+            group.end - group.start + 1,
+        };
+      })
+      .filter((line) => {
+        return (
+          line.score >= 0.2 &&
+          line.thickness <=
+            Math.max(
+              12,
+              Math.round(width * 0.015),
+            )
+        );
       });
-    }
 
-    const detectedLines =
-      candidateGroups
-        .map((group) => {
-          let strongestX = group.start;
-          let strongestScore =
-            smoothedScores[group.start];
+    const merged = this.#mergeNearbyAxisLines(
+      lines,
+      "x",
+      Math.max(
+        4,
+        Math.round(width * 0.004),
+      ),
+    );
 
-          for (
-            let x = group.start + 1;
-            x <= group.end;
-            x += 1
-          ) {
-            if (
-              smoothedScores[x] >
-              strongestScore
-            ) {
-              strongestScore =
-                smoothedScores[x];
+    this.#addBoundaryAxisLineIfMissing(
+      merged,
+      "x",
+      Math.round(reportBounds.x),
+      width,
+    );
 
-              strongestX = x;
-            }
-          }
-
-          return {
-            x: strongestX,
-            score: strongestScore,
-            thickness:
-              group.end -
-              group.start +
-              1,
-          };
-        })
-        .filter((line) => {
-          return (
-            line.score >= 0.2 &&
-            line.thickness <=
-              Math.max(
-                12,
-                width * 0.015,
-              )
-          );
-        });
-
-    const mergedLines =
-      this.#mergeNearbyLines(
-        detectedLines,
-        Math.max(
-          4,
-          Math.round(width * 0.004),
-        ),
-      );
-
-    const requiredLeft =
-      Math.round(reportBounds.x);
-
-    const requiredRight =
+    this.#addBoundaryAxisLineIfMissing(
+      merged,
+      "x",
       Math.round(
         reportBounds.x +
         reportBounds.width,
-      );
-
-    this.#addBoundaryLineIfMissing(
-      mergedLines,
-      requiredLeft,
+      ),
       width,
     );
 
-    this.#addBoundaryLineIfMissing(
-      mergedLines,
-      requiredRight,
-      width,
-    );
-
-    return mergedLines
+    return merged
       .sort((a, b) => a.x - b.x)
       .map((line, index) => ({
         index: index + 1,
@@ -480,50 +412,268 @@ export class LayoutEngine {
       }));
   }
 
-  #mergeNearbyLines(
+  #detectHorizontalRows(
+    grayscale,
+    width,
+    height,
+    threshold,
+    reportBounds,
+  ) {
+    const startX = Math.max(
+      0,
+      Math.floor(reportBounds.x),
+    );
+
+    const endX = Math.min(
+      width - 1,
+      Math.ceil(
+        reportBounds.x + reportBounds.width,
+      ),
+    );
+
+    const startY = Math.max(
+      0,
+      Math.floor(reportBounds.y),
+    );
+
+    const endY = Math.min(
+      height - 1,
+      Math.ceil(
+        reportBounds.y + reportBounds.height,
+      ),
+    );
+
+    const scores = new Float32Array(height);
+    const scanWidth = Math.max(1, endX - startX + 1);
+
+    for (
+      let y = startY;
+      y <= endY;
+      y += 1
+    ) {
+      let darkPixels = 0;
+      let longestRun = 0;
+      let currentRun = 0;
+
+      for (
+        let x = startX;
+        x <= endX;
+        x += 1
+      ) {
+        const isDark =
+          grayscale[y * width + x] < threshold;
+
+        if (isDark) {
+          darkPixels += 1;
+          currentRun += 1;
+          longestRun = Math.max(
+            longestRun,
+            currentRun,
+          );
+        } else {
+          currentRun = 0;
+        }
+      }
+
+      const darkRatio = darkPixels / scanWidth;
+      const runRatio = longestRun / scanWidth;
+
+      scores[y] =
+        darkRatio * 0.45 +
+        runRatio * 0.55;
+    }
+
+    const smoothed = this.#smoothScores(
+      scores,
+      2,
+      startY,
+      endY,
+    );
+
+    const groups = this.#findScoreGroups(
+      smoothed,
+      startY,
+      endY,
+      0.16,
+    );
+
+    const lines = groups
+      .map((group) => {
+        const strongest = this.#findStrongestPosition(
+          smoothed,
+          group.start,
+          group.end,
+        );
+
+        return {
+          y: strongest.position,
+          score: strongest.score,
+          thickness:
+            group.end - group.start + 1,
+        };
+      })
+      .filter((line) => {
+        return (
+          line.score >= 0.18 &&
+          line.thickness <=
+            Math.max(
+              12,
+              Math.round(height * 0.01),
+            )
+        );
+      });
+
+    const merged = this.#mergeNearbyAxisLines(
+      lines,
+      "y",
+      Math.max(
+        4,
+        Math.round(height * 0.003),
+      ),
+    );
+
+    this.#addBoundaryAxisLineIfMissing(
+      merged,
+      "y",
+      Math.round(reportBounds.y),
+      height,
+    );
+
+    this.#addBoundaryAxisLineIfMissing(
+      merged,
+      "y",
+      Math.round(
+        reportBounds.y +
+        reportBounds.height,
+      ),
+      height,
+    );
+
+    return merged
+      .sort((a, b) => a.y - b.y)
+      .map((line, index) => ({
+        index: index + 1,
+        y: line.y,
+        relativeY:
+          reportBounds.height > 0
+            ? Number(
+                (
+                  (
+                    line.y -
+                    reportBounds.y
+                  ) /
+                  reportBounds.height
+                ).toFixed(4),
+              )
+            : 0,
+        confidence: Math.round(
+          Math.min(
+            100,
+            line.score * 100,
+          ),
+        ),
+      }));
+  }
+
+  #findScoreGroups(
+    scores,
+    start,
+    end,
+    minimumScore,
+  ) {
+    const groups = [];
+    let groupStart = null;
+
+    for (
+      let index = start;
+      index <= end;
+      index += 1
+    ) {
+      if (scores[index] >= minimumScore) {
+        if (groupStart === null) {
+          groupStart = index;
+        }
+      } else if (groupStart !== null) {
+        groups.push({
+          start: groupStart,
+          end: index - 1,
+        });
+
+        groupStart = null;
+      }
+    }
+
+    if (groupStart !== null) {
+      groups.push({
+        start: groupStart,
+        end,
+      });
+    }
+
+    return groups;
+  }
+
+  #findStrongestPosition(
+    scores,
+    start,
+    end,
+  ) {
+    let position = start;
+    let score = scores[start];
+
+    for (
+      let index = start + 1;
+      index <= end;
+      index += 1
+    ) {
+      if (scores[index] > score) {
+        score = scores[index];
+        position = index;
+      }
+    }
+
+    return {
+      position,
+      score,
+    };
+  }
+
+  #mergeNearbyAxisLines(
     lines,
+    coordinateKey,
     maximumDistance,
   ) {
     if (lines.length === 0) {
       return [];
     }
 
-    const sortedLines =
-      [...lines].sort(
-        (a, b) => a.x - b.x,
-      );
+    const sorted = [...lines].sort(
+      (first, second) =>
+        first[coordinateKey] -
+        second[coordinateKey],
+    );
 
     const merged = [];
-
-    let current =
-      { ...sortedLines[0] };
+    let current = { ...sorted[0] };
 
     for (
       let index = 1;
-      index < sortedLines.length;
+      index < sorted.length;
       index += 1
     ) {
-      const next =
-        sortedLines[index];
+      const next = sorted[index];
 
       if (
-        next.x - current.x <=
+        next[coordinateKey] -
+          current[coordinateKey] <=
         maximumDistance
       ) {
-        if (
-          next.score >
-          current.score
-        ) {
-          current = {
-            ...next,
-          };
+        if (next.score > current.score) {
+          current = { ...next };
         }
       } else {
         merged.push(current);
-
-        current = {
-          ...next,
-        };
+        current = { ...next };
       }
     }
 
@@ -532,28 +682,28 @@ export class LayoutEngine {
     return merged;
   }
 
-  #addBoundaryLineIfMissing(
+  #addBoundaryAxisLineIfMissing(
     lines,
-    targetX,
-    width,
+    coordinateKey,
+    target,
+    dimension,
   ) {
-    const tolerance =
-      Math.max(
-        6,
-        Math.round(width * 0.006),
-      );
+    const tolerance = Math.max(
+      6,
+      Math.round(dimension * 0.006),
+    );
 
-    const exists =
-      lines.some((line) => {
-        return (
-          Math.abs(line.x - targetX) <=
-          tolerance
-        );
-      });
+    const exists = lines.some((line) => {
+      return (
+        Math.abs(
+          line[coordinateKey] - target,
+        ) <= tolerance
+      );
+    });
 
     if (!exists) {
       lines.push({
-        x: targetX,
+        [coordinateKey]: target,
         score: 0.5,
         thickness: 1,
       });
@@ -566,8 +716,9 @@ export class LayoutEngine {
     start,
     end,
   ) {
-    const output =
-      new Float32Array(scores.length);
+    const output = new Float32Array(
+      scores.length,
+    );
 
     for (
       let index = start;
@@ -577,11 +728,15 @@ export class LayoutEngine {
       let sum = 0;
       let count = 0;
 
-      const from =
-        Math.max(start, index - radius);
+      const from = Math.max(
+        start,
+        index - radius,
+      );
 
-      const to =
-        Math.min(end, index + radius);
+      const to = Math.min(
+        end,
+        index + radius,
+      );
 
       for (
         let position = from;
@@ -606,10 +761,9 @@ export class LayoutEngine {
     width,
     height,
   ) {
-    const grayscale =
-      new Uint8Array(
-        width * height,
-      );
+    const grayscale = new Uint8Array(
+      width * height,
+    );
 
     for (
       let pixelIndex = 0,
@@ -618,21 +772,15 @@ export class LayoutEngine {
       pixelIndex += 4,
         grayIndex += 1
     ) {
-      const red =
-        data[pixelIndex];
+      const red = data[pixelIndex];
+      const green = data[pixelIndex + 1];
+      const blue = data[pixelIndex + 2];
 
-      const green =
-        data[pixelIndex + 1];
-
-      const blue =
-        data[pixelIndex + 2];
-
-      grayscale[grayIndex] =
-        Math.round(
-          red * 0.299 +
-          green * 0.587 +
-          blue * 0.114,
-        );
+      grayscale[grayIndex] = Math.round(
+        red * 0.299 +
+        green * 0.587 +
+        blue * 0.114,
+      );
     }
 
     return grayscale;
@@ -675,16 +823,10 @@ export class LayoutEngine {
       index < end;
       index += 1
     ) {
-      if (
-        scores[index] >=
-        minimumScore
-      ) {
+      if (scores[index] >= minimumScore) {
         runLength += 1;
 
-        if (
-          runLength >=
-          requiredRun
-        ) {
+        if (runLength >= requiredRun) {
           return (
             index -
             requiredRun +
@@ -713,16 +855,10 @@ export class LayoutEngine {
       index >= start;
       index -= 1
     ) {
-      if (
-        scores[index] >=
-        minimumScore
-      ) {
+      if (scores[index] >= minimumScore) {
         runLength += 1;
 
-        if (
-          runLength >=
-          requiredRun
-        ) {
+        if (runLength >= requiredRun) {
           return (
             index +
             requiredRun -
@@ -749,15 +885,11 @@ export class LayoutEngine {
       top,
       bottom,
     ].filter(
-      (value) =>
-        value !== null,
+      (value) => value !== null,
     ).length;
 
     return Math.round(
-      (
-        detectedValues /
-        4
-      ) * 100,
+      (detectedValues / 4) * 100,
     );
   }
 }
