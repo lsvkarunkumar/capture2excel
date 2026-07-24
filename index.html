@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+
+  <title>Capture2Excel</title>
+
+  <link rel="stylesheet" href="style.css" />
+
+  <script
+    src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs"
+    type="module"
+  ></script>
+
+  <script
+    src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"
+    defer
+  ></script>
+
+  <script src="app.js" type="module"></script>
+</head>
+
+<body>
+  <header class="app-header">
+    <div>
+      <h1>Capture2Excel</h1>
+      <p>Capture tables, text and graphs from documents</p>
+    </div>
+
+    <div class="header-actions">
+      <label class="button primary-button">
+        Open Document
+        <input
+          id="documentInput"
+          type="file"
+          accept=".pdf,image/png,image/jpeg,image/webp"
+          hidden
+        />
+      </label>
+
+      <button id="exportButton" class="button" disabled>
+        Export Excel
+      </button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="document-panel">
+      <div class="document-toolbar">
+        <button id="previousPageButton" class="toolbar-button" disabled>
+          Previous
+        </button>
+
+        <span id="pageIndicator">No document opened</span>
+
+        <button id="nextPageButton" class="toolbar-button" disabled>
+          Next
+        </button>
+
+        <button id="zoomOutButton" class="toolbar-button" disabled>
+          Zoom −
+        </button>
+
+        <button id="zoomInButton" class="toolbar-button" disabled>
+          Zoom +
+        </button>
+
+        <button id="clearSelectionButton" class="toolbar-button" disabled>
+          Clear Selection
+        </button>
+      </div>
+
+      <div id="viewerContainer" class="viewer-container">
+        <div id="emptyState" class="empty-state">
+          <h2>Open a PDF or image</h2>
+          <p>
+            Draw a box around a table, graph, text block or image,
+            then click Capture.
+          </p>
+        </div>
+
+        <div id="canvasWrapper" class="canvas-wrapper hidden">
+          <canvas id="documentCanvas"></canvas>
+          <canvas id="selectionCanvas"></canvas>
+
+          <button id="captureButton" class="floating-capture hidden">
+            Capture
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="capture-panel">
+      <div class="capture-panel-header">
+        <div>
+          <h2>Captured Items</h2>
+          <p id="captureCount">0 captures</p>
+        </div>
+
+        <button id="clearCapturesButton" class="text-button" disabled>
+          Clear All
+        </button>
+      </div>
+
+      <div id="captureList" class="capture-list">
+        <div class="capture-empty-state">
+          Captured regions will appear here.
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <dialog id="captureDialog" class="capture-dialog">
+    <form method="dialog">
+      <div class="dialog-header">
+        <div>
+          <h2>Review Capture</h2>
+          <p id="dialogCaptureReference"></p>
+        </div>
+
+        <button
+          id="closeDialogButton"
+          class="dialog-close"
+          value="cancel"
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </div>
+
+      <div class="dialog-content">
+        <div class="capture-preview-area">
+          <img id="capturePreviewImage" alt="Selected capture preview" />
+        </div>
+
+        <div class="capture-fields">
+          <label>
+            Capture name
+            <input id="captureNameInput" type="text" />
+          </label>
+
+          <label>
+            Content type
+            <select id="captureTypeSelect">
+              <option value="auto">Auto detect</option>
+              <option value="table">Table</option>
+              <option value="graph">Graph</option>
+              <option value="text">Text</option>
+              <option value="image">Image</option>
+              <option value="mixed">Mixed</option>
+            </select>
+          </label>
+
+          <label>
+            Group or sheet name
+            <input
+              id="captureGroupInput"
+              type="text"
+              placeholder="Example: Production Data"
+            />
+          </label>
+
+          <label>
+            Notes
+            <textarea
+              id="captureNotesInput"
+              rows="4"
+              placeholder="Optional notes"
+            ></textarea>
+          </label>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button class="button" value="cancel">
+          Cancel
+        </button>
+
+        <button
+          id="saveCaptureButton"
+          class="button primary-button"
+          value="default"
+        >
+          Save Capture
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="statusMessage" class="status-message hidden"></div>
+</body>
+</html>
