@@ -61,6 +61,8 @@ let captures = loadCaptures();
 const MIN_SELECTION_SIZE = 15;
 const HANDLE_SIZE = 10;
 
+const layoutEngine = new LayoutEngine();
+
 documentInput.addEventListener("change", handleDocumentOpen);
 
 previousPageButton.addEventListener("click", async () => {
@@ -900,6 +902,14 @@ function saveCurrentPageCapture(options = {}) {
     captureCanvas.height,
   );
 
+  let layoutAnalysis = null;
+
+try {
+  layoutAnalysis = layoutEngine.analyze(captureCanvas);
+} catch (error) {
+  console.error("Layout analysis failed.", error);
+}
+
   const captureNumber = captures.length + 1;
 
   const capture = {
@@ -929,6 +939,8 @@ function saveCurrentPageCapture(options = {}) {
     batchId,
     batchStartPage,
     batchEndPage,
+
+    layoutAnalysis,
 
     createdAt: new Date().toISOString(),
   };
