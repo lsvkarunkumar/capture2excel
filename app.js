@@ -4,7 +4,7 @@ import { OcrEngine } from "./modules/ocr-engine.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
 
-cconst documentInput = document.getElementById("documentInput");
+const documentInput = document.getElementById("documentInput");
 const processCapturesButton = document.getElementById(
   "processCapturesButton",
 );
