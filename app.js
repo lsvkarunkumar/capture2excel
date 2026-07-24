@@ -1395,16 +1395,16 @@ async function exportCapturesToExcel() {
     return;
   }
 
-  const pending = captures.filter(
-    c =>
-      c.extractionStatus !== "completed" ||
-      !c.extractedText
+  const pendingCaptures = captures.filter(
+    (capture) =>
+      capture.extractionStatus !== "completed" ||
+      !capture.extractedText,
   );
 
-  if (pending.length > 0) {
+  if (pendingCaptures.length > 0) {
     showStatus(
-      "Run 'Extract Data' before exporting.",
-      true
+      "Click Extract Data and wait until all captures are completed.",
+      true,
     );
     return;
   }
@@ -1418,10 +1418,9 @@ async function exportCapturesToExcel() {
     workbook.creator = "Capture2Excel";
     workbook.created = new Date();
 
-    const sheet =
-      workbook.addWorksheet("OCR Results");
+    const ocrSheet = workbook.addWorksheet("OCR Results");
 
-    sheet.columns = [
+    ocrSheet.columns = [
       {
         header: "Document",
         key: "document",
@@ -1449,30 +1448,117 @@ async function exportCapturesToExcel() {
       },
     ];
 
-    captures.forEach(capture => {
-
-      sheet.addRow({
-
-        document:
-          capture.documentName,
-
-        page:
-          capture.pageNumber,
-
-        capture:
-          capture.name,
-
-        confidence:
-          capture.ocrConfidence ?? "",
-
-        text:
-          capture.extractedText || "",
-
+    captures.forEach((capture) => {
+      ocrSheet.addRow({
+        document: capture.documentName,
+        page: capture.pageNumber,
+        capture: capture.name,
+        confidence: capture.ocrConfidence ?? "",
+        text: capture.extractedText || "",
       });
-
     });
 
-    styleHeaderRow(sheet);
+    styleHeaderRow(ocrSheet);
+
+    ocrSheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) {
+        return;
+      }
+
+      row.alignment = {
+        vertical: "top",
+        wrapText: true,
+      };
+
+      row.height = 120;
+    });
+
+    const imagesSheet = workbook.addWorksheet("Source Images");
+
+    imagesSheet.columns = [
+      {
+        header: "Document",
+        key: "document",
+        width: 30,
+      },
+      {
+        header: "Page",
+        key: "page",
+        width: 10,
+      },
+      {
+        header: "Capture",
+        key: "capture",
+        width: 20,
+      },
+      {
+        header: "Source Image",
+        key: "image",
+        width: 100,
+      },
+    ];
+
+    styleHeaderRow(imagesSheet);
+
+    let imageRowNumber = 2;
+
+    for (const capture of captures) {
+      imagesSheet.getCell(`A${imageRowNumber}`).value =
+        capture.documentName;
+
+      imagesSheet.getCell(`B${imageRowNumber}`).value =
+        capture.pageNumber;
+
+      imagesSheet.getCell(`C${imageRowNumber}`).value =
+        capture.name;
+
+      imagesSheet.getRow(imageRowNumber).height = 300;
+
+      const base64 = capture.imageDataUrl.split(",")[1];
+
+      const imageId = workbook.addImage({
+        base64,
+        extension: "png",
+      });
+
+      imagesSheet.addImage(imageId, {
+        tl: {
+          col: 3,
+          row: imageRowNumber - 1,
+        },
+        ext: {
+          width: 850,
+          height: 380,
+        },
+        editAs: "oneCell",
+      });
+
+      imageRowNumber += 1;
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const blob = new Blob([buffer], {
+      type:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    downloadBlob(
+      blob,
+      `Capture2Excel_OCR_${formatTimestampForFilename()}.xlsx`,
+    );
+
+    showStatus("OCR text and source images exported.");
+  } catch (error) {
+    console.error(error);
+    showStatus("Excel export failed.", true);
+  } finally {
+    exportButton.textContent = "Export Excel";
+    updateToolbarState();
+  }
+}
+
+styleHeaderRow(sheet);
 
     sheet.eachRow((row, index) => {
 
