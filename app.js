@@ -228,7 +228,8 @@ async function handleDocumentOpen(event) {
 
     setRunProgress("Ready");
     showStatus(`Opened ${currentDocumentName}`);
-  } catch (error) {
+  } 
+  catch (error) {
     console.error(error);
 
     currentDocument = null;
@@ -1508,26 +1509,7 @@ async function exportCapturesToExcel() {
       "OCR exported successfully."
     );
 
-  } catch (error) {
-
-    console.error(error);
-
-    showStatus(
-      "Excel export failed.",
-      true
-    );
-
-  } finally {
-
-    exportButton.textContent =
-      "Export Excel";
-
-    updateToolbarState();
-
-  }
-}
-
-
+  } 
 
 
 
