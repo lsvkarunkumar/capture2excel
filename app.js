@@ -4,7 +4,10 @@ import { OcrEngine } from "./modules/ocr-engine.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
 
-const documentInput = document.getElementById("documentInput");
+cconst documentInput = document.getElementById("documentInput");
+const processCapturesButton = document.getElementById(
+  "processCapturesButton",
+);
 const exportButton = document.getElementById("exportButton");
 
 const previousPageButton = document.getElementById("previousPageButton");
@@ -124,6 +127,10 @@ clearSelectionButton.addEventListener("click", () => {
 captureButton.addEventListener("click", handleManualCapture);
 
 clearCapturesButton.addEventListener("click", clearAllCaptures);
+processCapturesButton.addEventListener(
+  "click",
+  processAllCaptures,
+);
 exportButton.addEventListener("click", exportCapturesToExcel);
 
 runRegionButton.addEventListener("click", runRegionAcrossPages);
@@ -1167,12 +1174,87 @@ function setRunProgress(message, state = "") {
   }
 }
 
+async function processAllCaptures() {
+  if (captures.length === 0 || isBatchRunning) {
+    return;
+  }
+
+  processCapturesButton.disabled = true;
+  processCapturesButton.textContent = "Extracting…";
+
+  let completed = 0;
+  let failed = 0;
+
+  try {
+    for (let index = 0; index < captures.length; index += 1) {
+      const capture = captures[index];
+
+      capture.extractionStatus = "processing";
+      renderCaptureList();
+
+      setRunProgress(
+        `Extracting ${index + 1} of ${captures.length}`,
+        "running",
+      );
+
+      try {
+        const ocrResult = await ocrEngine.recognize(
+          capture.imageDataUrl,
+        );
+
+        capture.ocrResult = ocrResult;
+        capture.extractedText = ocrResult.text;
+        capture.ocrConfidence = ocrResult.confidence;
+        capture.extractionStatus = "completed";
+
+        completed += 1;
+      } catch (error) {
+        console.error(
+          `OCR failed for ${capture.name}.`,
+          error,
+        );
+
+        capture.extractionStatus = "failed";
+        capture.extractionError =
+          error instanceof Error
+            ? error.message
+            : "OCR processing failed.";
+
+        failed += 1;
+      }
+
+      saveCaptures();
+      renderCaptureList();
+    }
+
+    setRunProgress(
+      `Extraction complete · ${completed} completed${
+        failed > 0 ? ` · ${failed} failed` : ""
+      }`,
+      failed > 0 ? "stopped" : "complete",
+    );
+
+    showStatus(
+      `OCR extraction completed for ${completed} capture${
+        completed === 1 ? "" : "s"
+      }.`,
+      failed > 0,
+    );
+  } finally {
+    processCapturesButton.textContent = "Extract Data";
+    updateToolbarState();
+  }
+}
+
 function renderCaptureList() {
   captureCount.textContent =
     `${captures.length} ${
       captures.length === 1 ? "capture" : "captures"
     }`;
 
+  processCapturesButton.disabled =
+  isBatchRunning || captures.length === 0;
+  
   exportButton.disabled =
     isBatchRunning || captures.length === 0;
 
